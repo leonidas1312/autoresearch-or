@@ -16,7 +16,7 @@ TIME_BOXED_MULTI_START_LIMIT = 128
 RELOCATE_RESERVE_FRACTION = 0.10
 PER_CANDIDATE_RELOCATE_LIMIT_S = 0.01
 ITERATED_LOCAL_SEARCH_MIN_DIMENSION = 40
-ITERATED_LOCAL_SEARCH_MAX_DIMENSION = 100
+ITERATED_LOCAL_SEARCH_MAX_DIMENSION = 90
 ITERATED_LOCAL_SEARCH_TRIGGER_GAP_PCT = 0.5
 ITERATED_LOCAL_SEARCH_BLOCK_SHIFT_WIDTH = 6
 SMALL_INSTANCE_BUDGET_WEIGHTS = {
@@ -178,14 +178,6 @@ def block_shift_kick(tour: list[int], rng: random.Random) -> list[int]:
     remainder = tour[:start] + tour[start + width :]
     insert_at = rng.randrange(0, len(remainder) + 1)
     return remainder[:insert_at] + block + remainder[insert_at:]
-
-
-def double_bridge_kick(tour: list[int], rng: random.Random) -> list[int]:
-    n = len(tour)
-    if n < 8:
-        return tour[:]
-    a, b, c, d = sorted(rng.sample(range(1, n), 4))
-    return tour[:a] + tour[c:d] + tour[b:c] + tour[a:b] + tour[d:]
 
 
 def sweep_tour(instance: TSPInstance) -> list[int]:
@@ -431,10 +423,7 @@ def solve_instance(instance: TSPInstance, budget_s: float, seed: int) -> dict[st
         best_tour = improved_tour[:]
         best_objective = objective
         while time.perf_counter() < deadline:
-            if instance.dimension >= 95:
-                candidate_tour = double_bridge_kick(best_tour, rng)
-            else:
-                candidate_tour = block_shift_kick(best_tour, rng)
+            candidate_tour = block_shift_kick(best_tour, rng)
             candidate_tour, _ = two_opt(instance, candidate_tour, deadline)
             if time.perf_counter() < deadline:
                 candidate_tour, _ = relocate(instance, candidate_tour, deadline)
