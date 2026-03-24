@@ -294,6 +294,8 @@ def two_opt(instance: TSPInstance, tour: list[int], deadline: float) -> tuple[li
     while passes < max_passes and time.perf_counter() < deadline:
         improved = False
         passes += 1
+        best_delta = 0
+        best_move: tuple[int, int] | None = None
         for i in range(n - 3):
             if time.perf_counter() >= deadline:
                 return tour, {"two_opt_mode": mode, "passes": passes, "improvements": improvements}
@@ -305,13 +307,23 @@ def two_opt(instance: TSPInstance, tour: list[int], deadline: float) -> tuple[li
                     continue
                 c = tour[j]
                 d = tour[(j + 1) % n]
-                if _two_opt_delta(instance, a, b, c, d) < 0:
+                delta = _two_opt_delta(instance, a, b, c, d)
+                if mode == "full":
+                    if delta < best_delta:
+                        best_delta = delta
+                        best_move = (i, j)
+                elif delta < 0:
                     tour[i + 1 : j + 1] = reversed(tour[i + 1 : j + 1])
                     improvements += 1
                     improved = True
                     break
             if improved:
                 break
+        if mode == "full" and best_move is not None:
+            i, j = best_move
+            tour[i + 1 : j + 1] = reversed(tour[i + 1 : j + 1])
+            improvements += 1
+            improved = True
         if not improved:
             break
 
