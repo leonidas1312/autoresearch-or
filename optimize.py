@@ -61,7 +61,7 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
         candidate_relocate_limit_s=0.0,
         ils_enabled=True,
         ils_trigger_gap_pct=0.0,
-        ils_block_width=4,
+        ils_block_width=5,
     ),
     "berlin52": SolverSpec(
         solver_name="berlin52_ranked_multistart",
