@@ -34,8 +34,6 @@ class SolverSpec:
     ils_enabled: bool = False
     ils_trigger_gap_pct: float = ITERATED_LOCAL_SEARCH_TRIGGER_GAP_PCT
     ils_block_width: int = ITERATED_LOCAL_SEARCH_BLOCK_SHIFT_WIDTH
-    final_or_opt_block_size: int = 0
-    post_or_opt_two_opt: bool = False
 
 
 # The scheduler maps the fixed harness budget into per-benchmark solver budgets.
@@ -78,11 +76,10 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
         ils_enabled=True,
     ),
     "rd100": SolverSpec(
-        solver_name="rd100_or_opt_2",
+        solver_name="rd100_multistart",
         start_order="time_boxed",
         max_starts=4,
         ils_enabled=False,
-        final_or_opt_block_size=2,
     ),
 }
 
@@ -395,58 +392,6 @@ def relocate(instance: TSPInstance, tour: list[int], deadline: float) -> tuple[l
     return tour, {"relocate_mode": "best_improvement", "relocate_moves": moves}
 
 
-def or_opt(
-    instance: TSPInstance,
-    tour: list[int],
-    block_size: int,
-    deadline: float,
-) -> tuple[list[int], dict[str, Any]]:
-    n = len(tour)
-    if n < block_size + 3 or time.perf_counter() >= deadline:
-        return tour, {"or_opt_block_size": block_size, "or_opt_moves": 0, "or_opt_mode": "skipped"}
-
-    moves = 0
-    while time.perf_counter() < deadline:
-        best_delta = 0
-        best_move: tuple[int, int] | None = None
-        for i in range(n - block_size + 1):
-            prev_i = tour[i - 1]
-            first = tour[i]
-            last = tour[i + block_size - 1]
-            next_i = tour[(i + block_size) % n]
-            remove_delta = (
-                _distance(instance, prev_i, next_i)
-                - _distance(instance, prev_i, first)
-                - _distance(instance, last, next_i)
-            )
-            for j in range(n):
-                if j >= i - 1 and j < i + block_size:
-                    continue
-                a = tour[j]
-                b = tour[(j + 1) % n]
-                insert_delta = (
-                    _distance(instance, a, first)
-                    + _distance(instance, last, b)
-                    - _distance(instance, a, b)
-                )
-                delta = remove_delta + insert_delta
-                if delta < best_delta:
-                    best_delta = delta
-                    best_move = (i, j)
-            if time.perf_counter() >= deadline:
-                return tour, {"or_opt_block_size": block_size, "or_opt_moves": moves, "or_opt_mode": "best_improvement"}
-        if best_move is None:
-            break
-        i, j = best_move
-        block = tour[i : i + block_size]
-        reduced = tour[:i] + tour[i + block_size :]
-        insert_at = j + 1 if j < i else j - block_size + 1
-        tour = reduced[:insert_at] + block + reduced[insert_at:]
-        moves += 1
-
-    return tour, {"or_opt_block_size": block_size, "or_opt_moves": moves, "or_opt_mode": "best_improvement"}
-
-
 def prefix_meta(meta: dict[str, Any], prefix: str) -> dict[str, Any]:
     return {f"{prefix}{key}": value for key, value in meta.items()}
 
@@ -636,22 +581,6 @@ def solve_instance(instance: TSPInstance, budget_s: float, seed: int) -> dict[st
         seed,
         deadline,
     )
-    or_opt_meta = {
-        "or_opt_mode": "skipped",
-        "or_opt_block_size": spec.final_or_opt_block_size,
-        "or_opt_moves": 0,
-    }
-    if spec.final_or_opt_block_size > 0 and time.perf_counter() < deadline:
-        incumbent_tour, or_opt_meta = or_opt(
-            instance,
-            incumbent_tour,
-            spec.final_or_opt_block_size,
-            deadline,
-        )
-        incumbent_objective = compute_tour_length(instance, incumbent_tour)
-        if spec.post_or_opt_two_opt and time.perf_counter() < deadline:
-            incumbent_tour, _ = two_opt(instance, incumbent_tour, deadline)
-            incumbent_objective = compute_tour_length(instance, incumbent_tour)
 
     return {
         "solution": incumbent_tour,
@@ -659,7 +588,6 @@ def solve_instance(instance: TSPInstance, budget_s: float, seed: int) -> dict[st
         "metadata": {
             **solver_meta,
             **ils_meta,
-            **or_opt_meta,
             "elapsed_s": time.perf_counter() - started,
             "scheduler_budget_s": effective_budget,
             "scheduler_base_budget_s": budget_s,
