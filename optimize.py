@@ -38,11 +38,11 @@ class SolverSpec:
 
 # The scheduler maps the fixed harness budget into per-benchmark solver budgets.
 SCHEDULER_BUDGET_WEIGHTS = {
-    "att48": 0.38,
+    "att48": 0.40,
     "eil51": 0.16,
     "berlin52": 0.05,
     "pr76": 0.25,
-    "rd100": 0.16,
+    "rd100": 0.14,
 }
 
 
