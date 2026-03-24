@@ -52,6 +52,7 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
     "att48": SolverSpec(
         solver_name="att48_multistart_ils",
         start_order="pilot_ranked",
+        max_starts=8,
         ils_enabled=True,
     ),
     "eil51": SolverSpec(
