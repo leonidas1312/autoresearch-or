@@ -71,7 +71,16 @@ def order_time_boxed_starts(instance: TSPInstance, seed: int) -> list[int]:
             node,
         )
     )
-    return starts
+
+    quantiles = max(5, min(8, round(instance.dimension / 16)))
+    preferred = [starts[(index * instance.dimension) // quantiles] for index in range(quantiles)]
+    seen: set[int] = set()
+    ordered: list[int] = []
+    for node in preferred + starts:
+        if node not in seen:
+            ordered.append(node)
+            seen.add(node)
+    return ordered
 
 
 def nearest_neighbor_tour(instance: TSPInstance, start: int, deadline: float) -> list[int]:
