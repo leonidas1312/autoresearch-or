@@ -40,9 +40,9 @@ class SolverSpec:
 SCHEDULER_BUDGET_WEIGHTS = {
     "att48": 0.38,
     "eil51": 0.16,
-    "berlin52": 0.04,
+    "berlin52": 0.05,
     "pr76": 0.25,
-    "rd100": 0.17,
+    "rd100": 0.16,
 }
 
 
