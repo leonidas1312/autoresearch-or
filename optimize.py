@@ -20,6 +20,7 @@ ITERATED_LOCAL_SEARCH_MIN_DIMENSION = 40
 ITERATED_LOCAL_SEARCH_MAX_DIMENSION = 90
 ITERATED_LOCAL_SEARCH_TRIGGER_GAP_PCT = 0.5
 ITERATED_LOCAL_SEARCH_BLOCK_SHIFT_WIDTH = 6
+TARGETED_THREE_OPT_MAX_SPAN = 10
 PILOT_START_RANKING_LIMIT = 64
 PILOT_START_RANKING_MAX_S = 0.015
 
@@ -30,6 +31,7 @@ class SolverSpec:
     start_order: str = "time_boxed"
     restart_reserve_fraction: float = RELOCATE_RESERVE_FRACTION
     candidate_relocate_limit_s: float = PER_CANDIDATE_RELOCATE_LIMIT_S
+    targeted_three_opt_max_span: int = 0
     ils_enabled: bool = False
     ils_trigger_gap_pct: float = ITERATED_LOCAL_SEARCH_TRIGGER_GAP_PCT
     ils_block_width: int = ITERATED_LOCAL_SEARCH_BLOCK_SHIFT_WIDTH
@@ -71,6 +73,7 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
     "rd100": SolverSpec(
         solver_name="rd100_multistart",
         start_order="time_boxed",
+        targeted_three_opt_max_span=TARGETED_THREE_OPT_MAX_SPAN,
         ils_enabled=False,
     ),
 }
@@ -384,6 +387,52 @@ def relocate(instance: TSPInstance, tour: list[int], deadline: float) -> tuple[l
     return tour, {"relocate_mode": "best_improvement", "relocate_moves": moves}
 
 
+def targeted_three_opt(
+    instance: TSPInstance,
+    tour: list[int],
+    deadline: float,
+    max_span: int,
+) -> tuple[list[int], dict[str, Any]]:
+    n = len(tour)
+    if n < 8 or max_span < 2 or time.perf_counter() >= deadline:
+        return tour, {"three_opt_mode": "skipped", "three_opt_moves": 0}
+
+    base_objective = compute_tour_length(instance, tour)
+    scan_order = sorted(range(n - 5), key=lambda index: (abs(index - (n // 2)), index))
+    for i in scan_order:
+        a = tour[i]
+        b = tour[i + 1]
+        upper_j = min(n - 3, i + max_span)
+        for j in range(i + 1, upper_j):
+            c = tour[j]
+            d = tour[j + 1]
+            upper_k = min(n - 1, j + max_span)
+            for k in range(j + 1, upper_k):
+                if time.perf_counter() >= deadline:
+                    return tour, {"three_opt_mode": "targeted", "three_opt_moves": 0}
+                e = tour[k]
+                f = tour[k + 1]
+                delta = (
+                    _distance(instance, a, d)
+                    + _distance(instance, e, c)
+                    + _distance(instance, b, f)
+                    - _distance(instance, a, b)
+                    - _distance(instance, c, d)
+                    - _distance(instance, e, f)
+                )
+                if delta < 0:
+                    candidate = (
+                        tour[: i + 1]
+                        + tour[j + 1 : k + 1]
+                        + list(reversed(tour[i + 1 : j + 1]))
+                        + tour[k + 1 :]
+                    )
+                    if compute_tour_length(instance, candidate) < base_objective:
+                        return candidate, {"three_opt_mode": "targeted", "three_opt_moves": 1}
+
+    return tour, {"three_opt_mode": "targeted", "three_opt_moves": 0}
+
+
 def prefix_meta(meta: dict[str, Any], prefix: str) -> dict[str, Any]:
     return {f"{prefix}{key}": value for key, value in meta.items()}
 
@@ -562,6 +611,20 @@ def solve_instance(instance: TSPInstance, budget_s: float, seed: int) -> dict[st
         seed,
         deadline,
     )
+    three_opt_meta = {"three_opt_mode": "skipped", "three_opt_moves": 0}
+    if spec.targeted_three_opt_max_span and time.perf_counter() < deadline:
+        incumbent_tour, three_opt_meta = targeted_three_opt(
+            instance,
+            incumbent_tour,
+            deadline,
+            spec.targeted_three_opt_max_span,
+        )
+        if three_opt_meta["three_opt_moves"] and time.perf_counter() < deadline:
+            incumbent_tour, _ = two_opt(instance, incumbent_tour, deadline)
+            if time.perf_counter() < deadline:
+                incumbent_tour, _ = relocate(instance, incumbent_tour, deadline)
+            if time.perf_counter() < deadline:
+                incumbent_tour, _ = two_opt(instance, incumbent_tour, deadline)
     incumbent_objective = compute_tour_length(instance, incumbent_tour)
     incumbent_tour, incumbent_objective, ils_meta = run_ils(
         instance,
@@ -577,6 +640,7 @@ def solve_instance(instance: TSPInstance, budget_s: float, seed: int) -> dict[st
         "objective": incumbent_objective,
         "metadata": {
             **solver_meta,
+            **three_opt_meta,
             **ils_meta,
             "elapsed_s": time.perf_counter() - started,
             "scheduler_budget_s": effective_budget,
