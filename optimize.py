@@ -1,0 +1,385 @@
+from __future__ import annotations
+
+import argparse
+import math
+import random
+import time
+from typing import Any
+
+import prepare
+from prepare import TSPInstance
+
+EXACT_NEAREST_NEIGHBOR_LIMIT = 12_000
+FULL_TWO_OPT_LIMIT = 400
+WINDOWED_TWO_OPT_LIMIT = 100_000
+TIME_BOXED_MULTI_START_LIMIT = 128
+RELOCATE_RESERVE_FRACTION = 0.10
+
+
+def compute_tour_length(instance: TSPInstance, tour: list[int]) -> float:
+    return prepare.compute_tour_length(instance, tour)
+
+
+def _distance(instance: TSPInstance, a: int, b: int) -> int:
+    return prepare.edge_distance(instance, a, b)
+
+
+def choose_start_nodes(instance: TSPInstance, seed: int) -> list[int]:
+    n = instance.dimension
+    anchor_nodes = [0, n // 4, n // 2, (3 * n) // 4, n - 1]
+    rng = random.Random(seed)
+    candidates = [node for node in anchor_nodes if 0 <= node < n]
+
+    if n <= 100:
+        target = min(8, n)
+    elif n <= 1_000:
+        target = min(4, n)
+    elif n <= EXACT_NEAREST_NEIGHBOR_LIMIT:
+        target = min(2, n)
+    else:
+        target = 1
+
+    while len(candidates) < target:
+        candidates.append(rng.randrange(n))
+
+    unique: list[int] = []
+    seen: set[int] = set()
+    for node in candidates:
+        if node not in seen:
+            unique.append(node)
+            seen.add(node)
+        if len(unique) >= target:
+            break
+    return unique
+
+
+def nearest_neighbor_tour(instance: TSPInstance, start: int, deadline: float) -> list[int]:
+    n = instance.dimension
+    visited = bytearray(n)
+    visited[start] = 1
+    tour = [start]
+    current = start
+
+    while len(tour) < n:
+        if time.perf_counter() >= deadline:
+            break
+        best_node = -1
+        best_distance = math.inf
+        for candidate in range(n):
+            if visited[candidate]:
+                continue
+            distance = _distance(instance, current, candidate)
+            if distance < best_distance or (
+                distance == best_distance and candidate < best_node
+            ):
+                best_distance = distance
+                best_node = candidate
+        if best_node < 0:
+            break
+        visited[best_node] = 1
+        tour.append(best_node)
+        current = best_node
+
+    if len(tour) < n:
+        for node in range(n):
+            if not visited[node]:
+                tour.append(node)
+    return tour
+
+
+def sweep_tour(instance: TSPInstance) -> list[int]:
+    n = instance.dimension
+    order = list(range(n))
+    order.sort(key=lambda node: (instance.coords[node][0], instance.coords[node][1], node))
+
+    bucket_size = max(32, int(math.sqrt(n)))
+    tour: list[int] = []
+    reverse = False
+    for start in range(0, n, bucket_size):
+        block = order[start : start + bucket_size]
+        block.sort(
+            key=lambda node: (instance.coords[node][1], instance.coords[node][0], node),
+            reverse=reverse,
+        )
+        tour.extend(block)
+        reverse = not reverse
+    return tour
+
+
+def construct_initial_solution(
+    instance: TSPInstance,
+    budget_s: float,
+    seed: int,
+    deadline: float,
+) -> tuple[list[int], dict[str, Any]]:
+    if instance.dimension > EXACT_NEAREST_NEIGHBOR_LIMIT:
+        return sweep_tour(instance), {"construction": "sweep", "starts": 1}
+
+    starts = choose_start_nodes(instance, seed)
+    best_tour: list[int] | None = None
+    best_objective = math.inf
+
+    for start in starts:
+        if time.perf_counter() >= deadline:
+            break
+        candidate_tour = nearest_neighbor_tour(instance, start, deadline)
+        candidate_objective = compute_tour_length(instance, candidate_tour)
+        if candidate_objective < best_objective:
+            best_tour = candidate_tour
+            best_objective = candidate_objective
+
+    if best_tour is None:
+        best_tour = list(range(instance.dimension))
+
+    return best_tour, {
+        "construction": "multi_start_nearest_neighbor",
+        "starts": len(starts),
+        "budget_s": budget_s,
+    }
+
+
+def solve_time_boxed_multi_start(
+    instance: TSPInstance,
+    budget_s: float,
+    seed: int,
+    deadline: float,
+) -> tuple[list[int], dict[str, Any], dict[str, Any]]:
+    starts = list(range(instance.dimension))
+    random.Random(seed).shuffle(starts)
+    restart_deadline = deadline - (budget_s * RELOCATE_RESERVE_FRACTION)
+
+    best_tour: list[int] | None = None
+    best_objective = math.inf
+    best_start: int | None = None
+    best_local_search_meta = {"two_opt_mode": "skipped", "passes": 0, "improvements": 0}
+    relocate_meta = {"relocate_mode": "skipped", "relocate_moves": 0}
+    starts_tried = 0
+
+    for start in starts:
+        if time.perf_counter() >= restart_deadline:
+            break
+        candidate_tour = nearest_neighbor_tour(instance, start, restart_deadline)
+        candidate_tour, candidate_local_search_meta = two_opt(instance, candidate_tour, restart_deadline)
+        candidate_objective = compute_tour_length(instance, candidate_tour)
+        starts_tried += 1
+        if candidate_objective < best_objective:
+            best_tour = candidate_tour[:]
+            best_objective = candidate_objective
+            best_start = start
+            best_local_search_meta = candidate_local_search_meta
+
+    if best_tour is None:
+        best_tour = list(range(instance.dimension))
+    elif time.perf_counter() < deadline:
+        best_tour, relocate_meta = relocate(instance, best_tour, deadline)
+
+    return (
+        best_tour,
+        {
+            "construction": "time_boxed_random_start_nearest_neighbor",
+            "candidate_starts": len(starts),
+            "starts_tried": starts_tried,
+            "best_start": best_start,
+            "budget_s": budget_s,
+        },
+        {**best_local_search_meta, **relocate_meta},
+    )
+
+
+def _two_opt_delta(instance: TSPInstance, a: int, b: int, c: int, d: int) -> int:
+    return _distance(instance, a, c) + _distance(instance, b, d) - _distance(instance, a, b) - _distance(instance, c, d)
+
+
+def two_opt(instance: TSPInstance, tour: list[int], deadline: float) -> tuple[list[int], dict[str, Any]]:
+    n = len(tour)
+    if n < 4 or time.perf_counter() >= deadline:
+        return tour, {"two_opt_mode": "skipped", "passes": 0, "improvements": 0}
+
+    if n <= FULL_TWO_OPT_LIMIT:
+        window = n - 1
+        max_passes = 50
+        mode = "full"
+    elif n <= WINDOWED_TWO_OPT_LIMIT:
+        window = 80 if n <= 10_000 else 16
+        max_passes = 2 if n <= 10_000 else 1
+        mode = "windowed"
+    else:
+        return tour, {"two_opt_mode": "skipped", "passes": 0, "improvements": 0}
+
+    improvements = 0
+    passes = 0
+
+    while passes < max_passes and time.perf_counter() < deadline:
+        improved = False
+        passes += 1
+        for i in range(n - 3):
+            if time.perf_counter() >= deadline:
+                return tour, {"two_opt_mode": mode, "passes": passes, "improvements": improvements}
+            a = tour[i]
+            b = tour[i + 1]
+            upper_exclusive = n if mode == "full" else min(n, i + window + 1)
+            for j in range(i + 2, upper_exclusive):
+                if i == 0 and j == n - 1:
+                    continue
+                c = tour[j]
+                d = tour[(j + 1) % n]
+                if _two_opt_delta(instance, a, b, c, d) < 0:
+                    tour[i + 1 : j + 1] = reversed(tour[i + 1 : j + 1])
+                    improvements += 1
+                    improved = True
+                    break
+            if improved:
+                break
+        if not improved:
+            break
+
+    return tour, {"two_opt_mode": mode, "passes": passes, "improvements": improvements}
+
+
+def relocate(instance: TSPInstance, tour: list[int], deadline: float) -> tuple[list[int], dict[str, Any]]:
+    n = len(tour)
+    if n < 4 or time.perf_counter() >= deadline:
+        return tour, {"relocate_mode": "skipped", "relocate_moves": 0}
+
+    moves = 0
+
+    while time.perf_counter() < deadline:
+        best_delta = 0
+        best_move: tuple[int, int] | None = None
+        for i in range(n):
+            prev_i = tour[i - 1]
+            node = tour[i]
+            next_i = tour[(i + 1) % n]
+            remove_delta = _distance(instance, prev_i, next_i) - _distance(instance, prev_i, node) - _distance(instance, node, next_i)
+            for j in range(n):
+                if j == i or j == (i - 1) % n:
+                    continue
+                a = tour[j]
+                b = tour[(j + 1) % n]
+                insert_delta = _distance(instance, a, node) + _distance(instance, node, b) - _distance(instance, a, b)
+                delta = remove_delta + insert_delta
+                if delta < best_delta:
+                    best_delta = delta
+                    best_move = (i, j)
+            if time.perf_counter() >= deadline:
+                return tour, {"relocate_mode": "best_improvement", "relocate_moves": moves}
+        if best_move is None:
+            break
+        i, j = best_move
+        node = tour[i]
+        reduced = tour[:i] + tour[i + 1 :]
+        insert_at = j + 1 if j < i else j
+        tour = reduced[:insert_at] + [node] + reduced[insert_at:]
+        moves += 1
+
+    return tour, {"relocate_mode": "best_improvement", "relocate_moves": moves}
+
+
+def solve_instance(instance: TSPInstance, budget_s: float, seed: int) -> dict[str, Any]:
+    started = time.perf_counter()
+    effective_budget = max(0.01, budget_s)
+    deadline = started + effective_budget
+
+    if instance.dimension <= TIME_BOXED_MULTI_START_LIMIT:
+        improved_tour, construction_meta, local_search_meta = solve_time_boxed_multi_start(
+            instance,
+            effective_budget,
+            seed,
+            deadline,
+        )
+    else:
+        initial_tour, construction_meta = construct_initial_solution(
+            instance,
+            effective_budget,
+            seed,
+            deadline,
+        )
+        improved_tour, local_search_meta = two_opt(instance, initial_tour, deadline)
+    objective = compute_tour_length(instance, improved_tour)
+
+    return {
+        "solution": improved_tour,
+        "objective": objective,
+        "metadata": {
+            **construction_meta,
+            **local_search_meta,
+            "elapsed_s": time.perf_counter() - started,
+            "seed": seed,
+        },
+    }
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run one local TSP heuristic benchmark.")
+    parser.add_argument("--size", choices=tuple(prepare.BENCHMARK_TIERS), default="small")
+    parser.add_argument("--budget", type=float, default=30.0, help="Total wall-clock budget in seconds.")
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--status", choices=("baseline", "keep", "discard", "crash"), default="baseline")
+    parser.add_argument("--description", default="baseline")
+    return parser.parse_args()
+
+
+def print_run_summary(artifact: dict[str, Any], artifact_path: str, status: str) -> None:
+    print(f"[run] status={status}")
+    print(f"[run] score={artifact['aggregate_metrics']['score']:.6f}")
+    print(f"[run] median_score={artifact['aggregate_metrics']['median_score']:.6f}")
+    print(f"[run] runtime_s={artifact['aggregate_metrics']['total_runtime_s']:.3f}")
+    for metric in artifact["per_instance_metrics"]:
+        if metric["score_kind"] == "gap_pct":
+            score_text = f"gap_pct={metric['score']:.6f}"
+        else:
+            score_text = f"raw_objective={metric['score']:.2f}"
+        print(
+            f"[instance] {metric['name']} n={metric['dimension']} "
+            f"objective={metric['objective']:.2f} {score_text} runtime_s={metric['runtime_s']:.3f}"
+        )
+    print(f"[run] artifact={artifact_path}")
+
+
+def main() -> int:
+    args = parse_args()
+    instances = prepare.load_benchmark_instances(args.size, verbose=True)
+    if not instances:
+        return 0
+
+    benchmark_names = [instance.name for instance in instances]
+    run_started = time.perf_counter()
+
+    try:
+        artifact = prepare.run_benchmark(
+            instances=instances,
+            solve_instance=solve_instance,
+            size=args.size,
+            budget_s=args.budget,
+            seed=args.seed,
+        )
+        artifact_path = prepare.record_run(
+            artifact,
+            status=args.status,
+            description=args.description,
+        )
+    except Exception as exc:
+        crash_artifact = prepare.build_crash_artifact(
+            size=args.size,
+            seed=args.seed,
+            budget_s=args.budget,
+            benchmark_instance_names=benchmark_names,
+            total_runtime_s=time.perf_counter() - run_started,
+            error=str(exc),
+        )
+        artifact_path = prepare.record_run(
+            crash_artifact,
+            status="crash",
+            description=args.description,
+        )
+        print(f"[run] status=crash")
+        print(f"[run] error={exc}")
+        print(f"[run] artifact={artifact_path}")
+        raise
+
+    print_run_summary(artifact, str(artifact_path), args.status)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
