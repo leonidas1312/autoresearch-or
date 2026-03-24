@@ -19,11 +19,11 @@ ITERATED_LOCAL_SEARCH_MIN_DIMENSION = 40
 ITERATED_LOCAL_SEARCH_MAX_DIMENSION = 90
 ITERATED_LOCAL_SEARCH_TRIGGER_GAP_PCT = 0.5
 SMALL_INSTANCE_BUDGET_WEIGHTS = {
-    "att48": 0.30,
-    "eil51": 0.18,
-    "berlin52": 0.08,
-    "pr76": 0.29,
-    "rd100": 0.15,
+    "att48": 0.42,
+    "eil51": 0.16,
+    "berlin52": 0.05,
+    "pr76": 0.24,
+    "rd100": 0.13,
 }
 
 
