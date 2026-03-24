@@ -225,7 +225,8 @@ def solve_time_boxed_multi_start(
             break
         candidate_tour = nearest_neighbor_tour(instance, start, restart_deadline)
         candidate_tour, candidate_local_search_meta = two_opt(instance, candidate_tour, restart_deadline)
-        if time.perf_counter() < restart_deadline:
+        candidate_objective = compute_tour_length(instance, candidate_tour)
+        if candidate_objective < best_objective and time.perf_counter() < restart_deadline:
             candidate_relocate_deadline = min(
                 restart_deadline,
                 time.perf_counter() + PER_CANDIDATE_RELOCATE_LIMIT_S,
@@ -235,7 +236,7 @@ def solve_time_boxed_multi_start(
                 candidate_tour,
                 candidate_relocate_deadline,
             )
-        candidate_objective = compute_tour_length(instance, candidate_tour)
+            candidate_objective = compute_tour_length(instance, candidate_tour)
         starts_tried += 1
         if candidate_objective < best_objective:
             best_tour = candidate_tour[:]
