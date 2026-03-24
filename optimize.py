@@ -77,7 +77,7 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
     ),
     "rd100": SolverSpec(
         solver_name="rd100_multistart",
-        start_order="anchor_nodes",
+        start_order="time_boxed",
         max_starts=4,
         ils_enabled=False,
     ),
@@ -236,9 +236,6 @@ def build_start_order(
     seed: int,
     deadline: float,
 ) -> tuple[list[int], str]:
-    if spec.start_order == "anchor_nodes":
-        return choose_start_nodes(instance, seed), "anchor_nodes"
-
     base_order = order_time_boxed_starts(instance, seed)
     if spec.start_order != "pilot_ranked" or instance.dimension > PILOT_START_RANKING_LIMIT:
         return base_order, spec.start_order
