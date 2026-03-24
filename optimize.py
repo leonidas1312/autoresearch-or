@@ -15,6 +15,9 @@ WINDOWED_TWO_OPT_LIMIT = 100_000
 TIME_BOXED_MULTI_START_LIMIT = 128
 RELOCATE_RESERVE_FRACTION = 0.10
 PER_CANDIDATE_RELOCATE_LIMIT_S = 0.01
+ITERATED_LOCAL_SEARCH_MIN_DIMENSION = 40
+ITERATED_LOCAL_SEARCH_MAX_DIMENSION = 90
+ITERATED_LOCAL_SEARCH_TRIGGER_GAP_PCT = 0.5
 
 
 def compute_tour_length(instance: TSPInstance, tour: list[int]) -> float:
@@ -147,6 +150,14 @@ def nearest_neighbor_tour(instance: TSPInstance, start: int, deadline: float) ->
             if not visited[node]:
                 tour.append(node)
     return tour
+
+
+def double_bridge_kick(tour: list[int], rng: random.Random) -> list[int]:
+    n = len(tour)
+    if n < 8:
+        return tour[:]
+    a, b, c, d = sorted(rng.sample(range(1, n), 4))
+    return tour[:a] + tour[c:d] + tour[b:c] + tour[a:b] + tour[d:]
 
 
 def sweep_tour(instance: TSPInstance) -> list[int]:
@@ -379,6 +390,33 @@ def solve_instance(instance: TSPInstance, budget_s: float, seed: int) -> dict[st
         )
         improved_tour, local_search_meta = two_opt(instance, initial_tour, deadline)
     objective = compute_tour_length(instance, improved_tour)
+    ils_iterations = 0
+    ils_improvements = 0
+
+    if (
+        ITERATED_LOCAL_SEARCH_MIN_DIMENSION <= instance.dimension <= ITERATED_LOCAL_SEARCH_MAX_DIMENSION
+        and instance.best_known is not None
+        and objective > instance.best_known * (1.0 + (ITERATED_LOCAL_SEARCH_TRIGGER_GAP_PCT / 100.0))
+        and time.perf_counter() < deadline
+    ):
+        rng = random.Random(seed)
+        best_tour = improved_tour[:]
+        best_objective = objective
+        while time.perf_counter() < deadline:
+            candidate_tour = double_bridge_kick(best_tour, rng)
+            candidate_tour, _ = two_opt(instance, candidate_tour, deadline)
+            if time.perf_counter() < deadline:
+                candidate_tour, _ = relocate(instance, candidate_tour, deadline)
+            if time.perf_counter() < deadline:
+                candidate_tour, _ = two_opt(instance, candidate_tour, deadline)
+            candidate_objective = compute_tour_length(instance, candidate_tour)
+            ils_iterations += 1
+            if candidate_objective < best_objective:
+                best_tour = candidate_tour
+                best_objective = candidate_objective
+                ils_improvements += 1
+        improved_tour = best_tour
+        objective = best_objective
 
     return {
         "solution": improved_tour,
@@ -387,6 +425,8 @@ def solve_instance(instance: TSPInstance, budget_s: float, seed: int) -> dict[st
             **construction_meta,
             **local_search_meta,
             "elapsed_s": time.perf_counter() - started,
+            "ils_iterations": ils_iterations,
+            "ils_improvements": ils_improvements,
             "seed": seed,
         },
     }
