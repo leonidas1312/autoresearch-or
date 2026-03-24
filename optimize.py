@@ -19,14 +19,12 @@ ITERATED_LOCAL_SEARCH_MIN_DIMENSION = 40
 ITERATED_LOCAL_SEARCH_MAX_DIMENSION = 90
 ITERATED_LOCAL_SEARCH_TRIGGER_GAP_PCT = 0.5
 ITERATED_LOCAL_SEARCH_BLOCK_SHIFT_WIDTH = 6
-TARGETED_THREE_OPT_MIN_DIMENSION = 95
-TARGETED_THREE_OPT_MAX_SPAN = 10
 SMALL_INSTANCE_BUDGET_WEIGHTS = {
-    "att48": 0.38,
+    "att48": 0.40,
     "eil51": 0.16,
     "berlin52": 0.05,
     "pr76": 0.25,
-    "rd100": 0.16,
+    "rd100": 0.14,
 }
 
 
@@ -391,47 +389,6 @@ def relocate(instance: TSPInstance, tour: list[int], deadline: float) -> tuple[l
     return tour, {"relocate_mode": "best_improvement", "relocate_moves": moves}
 
 
-def targeted_three_opt(instance: TSPInstance, tour: list[int], deadline: float) -> tuple[list[int], dict[str, Any]]:
-    n = len(tour)
-    if n < 8 or time.perf_counter() >= deadline:
-        return tour, {"three_opt_mode": "skipped", "three_opt_moves": 0}
-
-    base_objective = compute_tour_length(instance, tour)
-    scan_order = sorted(range(n - 5), key=lambda index: (abs(index - (n // 2)), index))
-    for i in scan_order:
-        a = tour[i]
-        b = tour[i + 1]
-        upper_j = min(n - 3, i + TARGETED_THREE_OPT_MAX_SPAN)
-        for j in range(i + 1, upper_j):
-            c = tour[j]
-            d = tour[j + 1]
-            upper_k = min(n - 1, j + TARGETED_THREE_OPT_MAX_SPAN)
-            for k in range(j + 1, upper_k):
-                if time.perf_counter() >= deadline:
-                    return tour, {"three_opt_mode": "targeted", "three_opt_moves": 0}
-                e = tour[k]
-                f = tour[k + 1]
-                delta = (
-                    _distance(instance, a, d)
-                    + _distance(instance, e, c)
-                    + _distance(instance, b, f)
-                    - _distance(instance, a, b)
-                    - _distance(instance, c, d)
-                    - _distance(instance, e, f)
-                )
-                if delta < 0:
-                    candidate = (
-                        tour[: i + 1]
-                        + tour[j + 1 : k + 1]
-                        + list(reversed(tour[i + 1 : j + 1]))
-                        + tour[k + 1 :]
-                    )
-                    if compute_tour_length(instance, candidate) < base_objective:
-                        return candidate, {"three_opt_mode": "targeted", "three_opt_moves": 1}
-
-    return tour, {"three_opt_mode": "targeted", "three_opt_moves": 0}
-
-
 def solve_instance(instance: TSPInstance, budget_s: float, seed: int) -> dict[str, Any]:
     started = time.perf_counter()
     effective_budget = max(0.01, allocate_instance_budget(instance, budget_s))
@@ -452,16 +409,6 @@ def solve_instance(instance: TSPInstance, budget_s: float, seed: int) -> dict[st
             deadline,
         )
         improved_tour, local_search_meta = two_opt(instance, initial_tour, deadline)
-    three_opt_meta = {"three_opt_mode": "skipped", "three_opt_moves": 0}
-    if instance.dimension >= TARGETED_THREE_OPT_MIN_DIMENSION and time.perf_counter() < deadline:
-        improved_tour, three_opt_meta = targeted_three_opt(instance, improved_tour, deadline)
-        if three_opt_meta["three_opt_moves"] and time.perf_counter() < deadline:
-            improved_tour, _ = two_opt(instance, improved_tour, deadline)
-            if time.perf_counter() < deadline:
-                improved_tour, _ = relocate(instance, improved_tour, deadline)
-            if time.perf_counter() < deadline:
-                improved_tour, _ = two_opt(instance, improved_tour, deadline)
-
     objective = compute_tour_length(instance, improved_tour)
     ils_iterations = 0
     ils_improvements = 0
@@ -497,7 +444,6 @@ def solve_instance(instance: TSPInstance, budget_s: float, seed: int) -> dict[st
         "metadata": {
             **construction_meta,
             **local_search_meta,
-            **three_opt_meta,
             "elapsed_s": time.perf_counter() - started,
             "ils_iterations": ils_iterations,
             "ils_improvements": ils_improvements,
