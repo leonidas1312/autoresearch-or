@@ -6,8 +6,9 @@
 2. Create a fresh branch named `autoresearch/<tag>`.
 3. Read `README.md`, `prepare.py`, and `optimize.py`.
 4. Confirm that the repo is ready.
-5. Initialize `results.tsv` if it does not exist.
-6. Run the baseline first before making changes.
+5. Ensure `run.log` and `results.tsv` are ignored locally and are never committed.
+6. Initialize `results.tsv` if it does not exist.
+7. Run the baseline first before making changes.
 
 ## Experimentation
 
@@ -52,6 +53,9 @@ Append one row to `results.tsv` after each experiment. Keep logging simple:
 - `status`
 - `description`
 
+Keep failed, discarded, and crashed experiments in `results.tsv`.
+Use the appropriate `status` and the commit that produced the run even if you later revert that solver change.
+
 ## Experiment Loop
 
 LOOP FOREVER:
@@ -61,7 +65,7 @@ LOOP FOREVER:
 4. Run the benchmark and redirect output to `run.log`.
 5. Read the final metric from the log.
 6. If the run crashed, inspect `run.log` and either fix once or discard.
-7. Record the result in `results.tsv`.
+7. Record the result in `results.tsv`, including failed or discarded runs.
 8. If the score improved, keep the commit.
 9. If the score is equal or worse, revert to the previous good commit.
 
