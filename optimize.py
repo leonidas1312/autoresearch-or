@@ -34,8 +34,6 @@ class SolverSpec:
     ils_enabled: bool = False
     ils_trigger_gap_pct: float = ITERATED_LOCAL_SEARCH_TRIGGER_GAP_PCT
     ils_block_width: int = ITERATED_LOCAL_SEARCH_BLOCK_SHIFT_WIDTH
-    ils_kick_mode: str = "block_shift"
-    ils_use_relocate: bool = True
 
 
 # The scheduler maps the fixed harness budget into per-benchmark solver budgets.
@@ -78,13 +76,10 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
         ils_enabled=True,
     ),
     "rd100": SolverSpec(
-        solver_name="rd100_double_bridge_ils",
+        solver_name="rd100_multistart",
         start_order="time_boxed",
-        max_starts=3,
-        restart_reserve_fraction=0.20,
-        ils_enabled=True,
-        ils_trigger_gap_pct=0.0,
-        ils_kick_mode="double_bridge",
+        max_starts=4,
+        ils_enabled=False,
     ),
 }
 
@@ -274,24 +269,6 @@ def block_shift_kick(tour: list[int], rng: random.Random, width: int) -> list[in
     remainder = tour[:start] + tour[start + width :]
     insert_at = rng.randrange(0, len(remainder) + 1)
     return remainder[:insert_at] + block + remainder[insert_at:]
-
-
-def double_bridge_kick(tour: list[int], rng: random.Random) -> list[int]:
-    n = len(tour)
-    if n < 8:
-        return tour[:]
-
-    cut1 = rng.randrange(1, max(2, n // 4))
-    cut2 = rng.randrange(cut1 + 1, max(cut1 + 2, n // 2))
-    cut3 = rng.randrange(cut2 + 1, max(cut2 + 2, (3 * n) // 4))
-    cut4 = rng.randrange(cut3 + 1, n)
-
-    a = tour[:cut1]
-    b = tour[cut1:cut2]
-    c = tour[cut2:cut3]
-    d = tour[cut3:cut4]
-    e = tour[cut4:]
-    return a + d + c + b + e
 
 
 def sweep_tour(instance: TSPInstance) -> list[int]:
@@ -558,12 +535,9 @@ def run_ils(
     improvements = 0
 
     while time.perf_counter() < deadline:
-        if spec.ils_kick_mode == "double_bridge":
-            candidate_tour = double_bridge_kick(best_tour, rng)
-        else:
-            candidate_tour = block_shift_kick(best_tour, rng, spec.ils_block_width)
+        candidate_tour = block_shift_kick(best_tour, rng, spec.ils_block_width)
         candidate_tour, _ = two_opt(instance, candidate_tour, deadline)
-        if spec.ils_use_relocate and time.perf_counter() < deadline:
+        if time.perf_counter() < deadline:
             candidate_tour, _ = relocate(instance, candidate_tour, deadline)
         if time.perf_counter() < deadline:
             candidate_tour, _ = two_opt(instance, candidate_tour, deadline)
