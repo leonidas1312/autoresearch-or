@@ -18,10 +18,37 @@ PER_CANDIDATE_RELOCATE_LIMIT_S = 0.01
 
 
 def compute_tour_length(instance: TSPInstance, tour: list[int]) -> float:
-    return prepare.compute_tour_length(instance, tour)
+    if not tour:
+        raise ValueError(f"Empty tour for {instance.name}")
+    total = 0
+    size = len(tour)
+    for index in range(size):
+        total += _distance(instance, tour[index], tour[(index + 1) % size])
+    return float(total)
+
+
+def _distance_matrix(instance: TSPInstance) -> list[list[int]] | None:
+    if instance.dimension > FULL_TWO_OPT_LIMIT:
+        return None
+    matrix = instance.metadata.get("_distance_matrix")
+    if matrix is not None:
+        return matrix
+
+    n = instance.dimension
+    matrix = [[0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(i + 1, n):
+            distance = prepare.edge_distance(instance, i, j)
+            matrix[i][j] = distance
+            matrix[j][i] = distance
+    instance.metadata["_distance_matrix"] = matrix
+    return matrix
 
 
 def _distance(instance: TSPInstance, a: int, b: int) -> int:
+    matrix = _distance_matrix(instance)
+    if matrix is not None:
+        return matrix[a][b]
     return prepare.edge_distance(instance, a, b)
 
 
