@@ -54,6 +54,26 @@ def choose_start_nodes(instance: TSPInstance, seed: int) -> list[int]:
     return unique
 
 
+def order_time_boxed_starts(instance: TSPInstance, seed: int) -> list[int]:
+    starts = list(range(instance.dimension))
+    if instance.dimension < 64:
+        random.Random(seed).shuffle(starts)
+        return starts
+
+    centroid_x = sum(x for x, _ in instance.coords) / instance.dimension
+    centroid_y = sum(y for _, y in instance.coords) / instance.dimension
+    starts.sort(
+        key=lambda node: (
+            math.atan2(
+                instance.coords[node][1] - centroid_y,
+                instance.coords[node][0] - centroid_x,
+            ),
+            node,
+        )
+    )
+    return starts
+
+
 def nearest_neighbor_tour(instance: TSPInstance, start: int, deadline: float) -> list[int]:
     n = instance.dimension
     visited = bytearray(n)
@@ -145,8 +165,7 @@ def solve_time_boxed_multi_start(
     seed: int,
     deadline: float,
 ) -> tuple[list[int], dict[str, Any], dict[str, Any]]:
-    starts = list(range(instance.dimension))
-    random.Random(seed).shuffle(starts)
+    starts = order_time_boxed_starts(instance, seed)
     restart_deadline = deadline - (budget_s * RELOCATE_RESERVE_FRACTION)
 
     best_tour: list[int] | None = None
