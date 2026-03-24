@@ -104,15 +104,6 @@ def order_time_boxed_starts(instance: TSPInstance, seed: int) -> list[int]:
     starts = list(range(instance.dimension))
     if instance.dimension < 64:
         random.Random(seed).shuffle(starts)
-        if instance.name == "eil51":
-            preferred = [7, 23, 37, 46]
-            seen: set[int] = set()
-            ordered: list[int] = []
-            for node in preferred + starts:
-                if node not in seen:
-                    ordered.append(node)
-                    seen.add(node)
-            return ordered
         return starts
 
     centroid_x = sum(x for x, _ in instance.coords) / instance.dimension
