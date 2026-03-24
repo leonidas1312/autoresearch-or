@@ -167,12 +167,17 @@ def nearest_neighbor_tour(instance: TSPInstance, start: int, deadline: float) ->
     return tour
 
 
-def double_bridge_kick(tour: list[int], rng: random.Random) -> list[int]:
+def block_shift_kick(tour: list[int], rng: random.Random) -> list[int]:
     n = len(tour)
-    if n < 8:
+    if n < 4:
         return tour[:]
-    a, b, c, d = sorted(rng.sample(range(1, n), 4))
-    return tour[:a] + tour[c:d] + tour[b:c] + tour[a:b] + tour[d:]
+    width = max(2, n // 10)
+    width = min(width, n - 1)
+    start = rng.randrange(0, n - width)
+    block = tour[start : start + width]
+    remainder = tour[:start] + tour[start + width :]
+    insert_at = rng.randrange(0, len(remainder) + 1)
+    return remainder[:insert_at] + block + remainder[insert_at:]
 
 
 def sweep_tour(instance: TSPInstance) -> list[int]:
@@ -418,7 +423,7 @@ def solve_instance(instance: TSPInstance, budget_s: float, seed: int) -> dict[st
         best_tour = improved_tour[:]
         best_objective = objective
         while time.perf_counter() < deadline:
-            candidate_tour = double_bridge_kick(best_tour, rng)
+            candidate_tour = block_shift_kick(best_tour, rng)
             candidate_tour, _ = two_opt(instance, candidate_tour, deadline)
             if time.perf_counter() < deadline:
                 candidate_tour, _ = relocate(instance, candidate_tour, deadline)
