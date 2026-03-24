@@ -470,17 +470,17 @@ def solve_with_multistart(
     final_relocate_meta = {"final_relocate_mode": "skipped", "final_relocate_moves": 0}
 
     if time.perf_counter() < deadline:
+        best_tour, polish_relocate_meta = relocate(instance, best_tour, deadline)
+        final_relocate_meta = {
+            "final_relocate_mode": polish_relocate_meta["relocate_mode"],
+            "final_relocate_moves": polish_relocate_meta["relocate_moves"],
+        }
+    if time.perf_counter() < deadline:
         best_tour, polish_two_opt_meta = two_opt(instance, best_tour, deadline)
         final_two_opt_meta = {
             "final_two_opt_mode": polish_two_opt_meta["two_opt_mode"],
             "final_two_opt_passes": polish_two_opt_meta["passes"],
             "final_two_opt_improvements": polish_two_opt_meta["improvements"],
-        }
-    if time.perf_counter() < deadline:
-        best_tour, polish_relocate_meta = relocate(instance, best_tour, deadline)
-        final_relocate_meta = {
-            "final_relocate_mode": polish_relocate_meta["relocate_mode"],
-            "final_relocate_moves": polish_relocate_meta["relocate_moves"],
         }
 
     return best_tour, {
