@@ -180,7 +180,7 @@ def order_time_boxed_starts(instance: TSPInstance, seed: int) -> list[int]:
         )
     )
 
-    quantiles = max(5, min(8, round(instance.dimension / 16)))
+    quantiles = max(4, min(6, round(instance.dimension / 20)))
     preferred = [starts[0], starts[-1]]
     bucket = instance.dimension / quantiles
     preferred.extend(
