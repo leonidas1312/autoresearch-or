@@ -71,7 +71,7 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
     "pr76": SolverSpec(
         solver_name="pr76_multistart_ils",
         start_order="time_boxed",
-        max_starts=6,
+        max_starts=5,
         restart_reserve_fraction=0.15,
         ils_enabled=True,
     ),
