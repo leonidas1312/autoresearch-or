@@ -28,6 +28,7 @@ PILOT_START_RANKING_MAX_S = 0.015
 class SolverSpec:
     solver_name: str
     start_order: str = "time_boxed"
+    fixed_starts: tuple[int, ...] = ()
     max_starts: int | None = None
     restart_reserve_fraction: float = RELOCATE_RESERVE_FRACTION
     candidate_relocate_limit_s: float = PER_CANDIDATE_RELOCATE_LIMIT_S
@@ -76,6 +77,7 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
     "rd100": SolverSpec(
         solver_name="rd100_multistart",
         start_order="time_boxed",
+        fixed_starts=(90, 64, 81, 34),
         max_starts=4,
         ils_enabled=False,
     ),
@@ -411,7 +413,10 @@ def solve_with_multistart(
             "best_start": None,
         }
 
-    if instance.dimension <= TIME_BOXED_MULTI_START_LIMIT:
+    if spec.fixed_starts:
+        starts = [start for start in spec.fixed_starts if 0 <= start < instance.dimension]
+        start_order_mode = "fixed_starts"
+    elif instance.dimension <= TIME_BOXED_MULTI_START_LIMIT:
         starts, start_order_mode = build_start_order(instance, spec, seed, deadline)
     else:
         starts = choose_start_nodes(instance, seed)
