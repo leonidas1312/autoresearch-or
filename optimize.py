@@ -20,7 +20,7 @@ ITERATED_LOCAL_SEARCH_MIN_DIMENSION = 40
 ITERATED_LOCAL_SEARCH_MAX_DIMENSION = 90
 ITERATED_LOCAL_SEARCH_TRIGGER_GAP_PCT = 0.5
 ITERATED_LOCAL_SEARCH_BLOCK_SHIFT_WIDTH = 6
-PILOT_START_RANKING_LIMIT = 100
+PILOT_START_RANKING_LIMIT = 64
 PILOT_START_RANKING_MAX_S = 0.015
 
 
@@ -77,7 +77,7 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
     ),
     "rd100": SolverSpec(
         solver_name="rd100_multistart",
-        start_order="pilot_ranked",
+        start_order="time_boxed",
         max_starts=4,
         ils_enabled=False,
     ),
