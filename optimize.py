@@ -56,11 +56,7 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
     "eil51": SolverSpec(
         solver_name="eil51_ranked_multistart",
         start_order="pilot_ranked",
-        restart_reserve_fraction=0.15,
-        candidate_relocate_limit_s=0.0,
-        ils_enabled=True,
-        ils_trigger_gap_pct=0.0,
-        ils_block_width=5,
+        ils_enabled=False,
     ),
     "berlin52": SolverSpec(
         solver_name="berlin52_ranked_multistart",
