@@ -18,7 +18,6 @@ PER_CANDIDATE_RELOCATE_LIMIT_S = 0.01
 ITERATED_LOCAL_SEARCH_MIN_DIMENSION = 40
 ITERATED_LOCAL_SEARCH_MAX_DIMENSION = 90
 ITERATED_LOCAL_SEARCH_TRIGGER_GAP_PCT = 0.5
-ITERATED_LOCAL_SEARCH_BLOCK_SHIFT_WIDTH = 6
 SMALL_INSTANCE_BUDGET_WEIGHTS = {
     "att48": 0.42,
     "eil51": 0.16,
@@ -172,7 +171,8 @@ def block_shift_kick(tour: list[int], rng: random.Random) -> list[int]:
     n = len(tour)
     if n < 4:
         return tour[:]
-    width = min(ITERATED_LOCAL_SEARCH_BLOCK_SHIFT_WIDTH, n - 1)
+    width = max(2, n // 10)
+    width = min(width, n - 1)
     start = rng.randrange(0, n - width)
     block = tour[start : start + width]
     remainder = tour[:start] + tour[start + width :]
