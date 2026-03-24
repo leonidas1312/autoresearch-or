@@ -100,7 +100,11 @@ def order_time_boxed_starts(instance: TSPInstance, seed: int) -> list[int]:
     )
 
     quantiles = max(5, min(8, round(instance.dimension / 16)))
-    preferred = [starts[(index * instance.dimension) // quantiles] for index in range(quantiles)]
+    preferred = [starts[0], starts[-1]]
+    preferred.extend(
+        starts[(index * instance.dimension) // quantiles]
+        for index in range(1, quantiles)
+    )
     seen: set[int] = set()
     ordered: list[int] = []
     for node in preferred + starts:
