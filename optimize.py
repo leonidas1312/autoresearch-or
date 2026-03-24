@@ -20,7 +20,7 @@ ITERATED_LOCAL_SEARCH_MIN_DIMENSION = 40
 ITERATED_LOCAL_SEARCH_MAX_DIMENSION = 90
 ITERATED_LOCAL_SEARCH_TRIGGER_GAP_PCT = 0.5
 ITERATED_LOCAL_SEARCH_BLOCK_SHIFT_WIDTH = 6
-PILOT_START_RANKING_LIMIT = 64
+PILOT_START_RANKING_LIMIT = 80
 PILOT_START_RANKING_MAX_S = 0.015
 
 
@@ -70,7 +70,7 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
     ),
     "pr76": SolverSpec(
         solver_name="pr76_multistart_ils",
-        start_order="time_boxed",
+        start_order="pilot_ranked",
         max_starts=6,
         restart_reserve_fraction=0.15,
         ils_enabled=True,
