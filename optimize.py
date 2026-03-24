@@ -77,7 +77,7 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
     ),
     "rd100": SolverSpec(
         solver_name="rd100_multistart",
-        start_order="time_boxed",
+        start_order="time_boxed_reversed",
         max_starts=4,
         ils_enabled=False,
     ),
@@ -196,6 +196,37 @@ def order_time_boxed_starts(instance: TSPInstance, seed: int) -> list[int]:
     return ordered
 
 
+def order_centroid_radius_starts(instance: TSPInstance) -> list[int]:
+    centroid_x = sum(x for x, _ in instance.coords) / instance.dimension
+    centroid_y = sum(y for _, y in instance.coords) / instance.dimension
+    starts = list(range(instance.dimension))
+    starts.sort(
+        key=lambda node: (
+            -(
+                (instance.coords[node][0] - centroid_x) ** 2
+                + (instance.coords[node][1] - centroid_y) ** 2
+            ),
+            node,
+        )
+    )
+    return starts
+
+
+def order_axis_extremes_starts(instance: TSPInstance, axis: int) -> list[int]:
+    starts = list(range(instance.dimension))
+    starts.sort(key=lambda node: (instance.coords[node][axis], node))
+    ordered: list[int] = []
+    left = 0
+    right = len(starts) - 1
+    while left <= right:
+        ordered.append(starts[left])
+        left += 1
+        if left <= right:
+            ordered.append(starts[right])
+            right -= 1
+    return ordered
+
+
 def nearest_neighbor_tour(instance: TSPInstance, start: int, deadline: float) -> list[int]:
     n = instance.dimension
     visited = bytearray(n)
@@ -236,6 +267,17 @@ def build_start_order(
     seed: int,
     deadline: float,
 ) -> tuple[list[int], str]:
+    if spec.start_order == "time_boxed_reversed":
+        starts = order_time_boxed_starts(instance, seed)
+        starts.reverse()
+        return starts, "time_boxed_reversed"
+    if spec.start_order == "centroid_radius":
+        return order_centroid_radius_starts(instance), "centroid_radius"
+    if spec.start_order == "x_extremes":
+        return order_axis_extremes_starts(instance, 0), "x_extremes"
+    if spec.start_order == "y_extremes":
+        return order_axis_extremes_starts(instance, 1), "y_extremes"
+
     base_order = order_time_boxed_starts(instance, seed)
     if spec.start_order != "pilot_ranked" or instance.dimension > PILOT_START_RANKING_LIMIT:
         return base_order, spec.start_order
