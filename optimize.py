@@ -34,6 +34,7 @@ class SolverSpec:
     ils_enabled: bool = False
     ils_trigger_gap_pct: float = ITERATED_LOCAL_SEARCH_TRIGGER_GAP_PCT
     ils_block_width: int = ITERATED_LOCAL_SEARCH_BLOCK_SHIFT_WIDTH
+    final_best_two_opt: bool = False
 
 
 # The scheduler maps the fixed harness budget into per-benchmark solver budgets.
@@ -76,10 +77,11 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
         ils_enabled=True,
     ),
     "rd100": SolverSpec(
-        solver_name="rd100_multistart",
+        solver_name="rd100_best_two_opt",
         start_order="time_boxed",
         max_starts=4,
         ils_enabled=False,
+        final_best_two_opt=True,
     ),
 }
 
@@ -345,6 +347,44 @@ def two_opt(instance: TSPInstance, tour: list[int], deadline: float) -> tuple[li
     return tour, {"two_opt_mode": mode, "passes": passes, "improvements": improvements}
 
 
+def best_improvement_two_opt(
+    instance: TSPInstance,
+    tour: list[int],
+    deadline: float,
+) -> tuple[list[int], dict[str, Any]]:
+    n = len(tour)
+    if n < 4 or time.perf_counter() >= deadline:
+        return tour, {"two_opt_mode": "skipped", "passes": 0, "improvements": 0}
+
+    passes = 0
+    improvements = 0
+    while time.perf_counter() < deadline:
+        best_move: tuple[int, int] | None = None
+        best_delta = 0
+        passes += 1
+        for i in range(n - 3):
+            a = tour[i]
+            b = tour[i + 1]
+            for j in range(i + 2, n):
+                if i == 0 and j == n - 1:
+                    continue
+                c = tour[j]
+                d = tour[(j + 1) % n]
+                delta = _two_opt_delta(instance, a, b, c, d)
+                if delta < best_delta:
+                    best_delta = delta
+                    best_move = (i, j)
+            if time.perf_counter() >= deadline:
+                return tour, {"two_opt_mode": "best_improvement_full", "passes": passes, "improvements": improvements}
+        if best_move is None:
+            break
+        i, j = best_move
+        tour[i + 1 : j + 1] = reversed(tour[i + 1 : j + 1])
+        improvements += 1
+
+    return tour, {"two_opt_mode": "best_improvement_full", "passes": passes, "improvements": improvements}
+
+
 def relocate(instance: TSPInstance, tour: list[int], deadline: float) -> tuple[list[int], dict[str, Any]]:
     n = len(tour)
     if n < 4 or time.perf_counter() >= deadline:
@@ -581,6 +621,23 @@ def solve_instance(instance: TSPInstance, budget_s: float, seed: int) -> dict[st
         seed,
         deadline,
     )
+    best_two_opt_meta = {
+        "best_two_opt_mode": "skipped",
+        "best_two_opt_passes": 0,
+        "best_two_opt_improvements": 0,
+    }
+    if spec.final_best_two_opt and time.perf_counter() < deadline:
+        incumbent_tour, best_two_opt_raw = best_improvement_two_opt(
+            instance,
+            incumbent_tour,
+            deadline,
+        )
+        incumbent_objective = compute_tour_length(instance, incumbent_tour)
+        best_two_opt_meta = {
+            "best_two_opt_mode": best_two_opt_raw["two_opt_mode"],
+            "best_two_opt_passes": best_two_opt_raw["passes"],
+            "best_two_opt_improvements": best_two_opt_raw["improvements"],
+        }
 
     return {
         "solution": incumbent_tour,
@@ -588,6 +645,7 @@ def solve_instance(instance: TSPInstance, budget_s: float, seed: int) -> dict[st
         "metadata": {
             **solver_meta,
             **ils_meta,
+            **best_two_opt_meta,
             "elapsed_s": time.perf_counter() - started,
             "scheduler_budget_s": effective_budget,
             "scheduler_base_budget_s": budget_s,
