@@ -76,8 +76,7 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
     "rd100": SolverSpec(
         solver_name="rd100_multistart",
         start_order="time_boxed",
-        max_starts=2,
-        restart_reserve_fraction=0.05,
+        max_starts=4,
         ils_enabled=False,
     ),
 }
