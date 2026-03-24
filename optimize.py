@@ -212,6 +212,11 @@ def solve_time_boxed_multi_start(
     best_objective = math.inf
     best_start: int | None = None
     best_local_search_meta = {"two_opt_mode": "skipped", "passes": 0, "improvements": 0}
+    final_two_opt_meta = {
+        "final_two_opt_mode": "skipped",
+        "final_two_opt_passes": 0,
+        "final_two_opt_improvements": 0,
+    }
     relocate_meta = {"relocate_mode": "skipped", "relocate_moves": 0}
     starts_tried = 0
 
@@ -241,6 +246,13 @@ def solve_time_boxed_multi_start(
     if best_tour is None:
         best_tour = list(range(instance.dimension))
     elif time.perf_counter() < deadline:
+        best_tour, final_two_opt_result = two_opt(instance, best_tour, deadline)
+        final_two_opt_meta = {
+            "final_two_opt_mode": final_two_opt_result["two_opt_mode"],
+            "final_two_opt_passes": final_two_opt_result["passes"],
+            "final_two_opt_improvements": final_two_opt_result["improvements"],
+        }
+    if best_tour is not None and time.perf_counter() < deadline:
         best_tour, relocate_meta = relocate(instance, best_tour, deadline)
 
     return (
@@ -252,7 +264,7 @@ def solve_time_boxed_multi_start(
             "best_start": best_start,
             "budget_s": budget_s,
         },
-        {**best_local_search_meta, **relocate_meta},
+        {**best_local_search_meta, **final_two_opt_meta, **relocate_meta},
     )
 
 
