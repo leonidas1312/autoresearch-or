@@ -18,6 +18,13 @@ PER_CANDIDATE_RELOCATE_LIMIT_S = 0.01
 ITERATED_LOCAL_SEARCH_MIN_DIMENSION = 40
 ITERATED_LOCAL_SEARCH_MAX_DIMENSION = 90
 ITERATED_LOCAL_SEARCH_TRIGGER_GAP_PCT = 0.5
+SMALL_INSTANCE_BUDGET_WEIGHTS = {
+    "att48": 0.30,
+    "eil51": 0.18,
+    "berlin52": 0.08,
+    "pr76": 0.29,
+    "rd100": 0.15,
+}
 
 
 def compute_tour_length(instance: TSPInstance, tour: list[int]) -> float:
@@ -53,6 +60,14 @@ def _distance(instance: TSPInstance, a: int, b: int) -> int:
     if matrix is not None:
         return matrix[a][b]
     return prepare.edge_distance(instance, a, b)
+
+
+def allocate_instance_budget(instance: TSPInstance, budget_s: float) -> float:
+    weight = SMALL_INSTANCE_BUDGET_WEIGHTS.get(instance.name)
+    if weight is None:
+        return budget_s
+    total_budget_s = budget_s * len(SMALL_INSTANCE_BUDGET_WEIGHTS)
+    return total_budget_s * weight
 
 
 def choose_start_nodes(instance: TSPInstance, seed: int) -> list[int]:
@@ -371,7 +386,7 @@ def relocate(instance: TSPInstance, tour: list[int], deadline: float) -> tuple[l
 
 def solve_instance(instance: TSPInstance, budget_s: float, seed: int) -> dict[str, Any]:
     started = time.perf_counter()
-    effective_budget = max(0.01, budget_s)
+    effective_budget = max(0.01, allocate_instance_budget(instance, budget_s))
     deadline = started + effective_budget
 
     if instance.dimension <= TIME_BOXED_MULTI_START_LIMIT:
