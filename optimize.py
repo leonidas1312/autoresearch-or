@@ -31,6 +31,7 @@ class SolverSpec:
     max_starts: int | None = None
     restart_reserve_fraction: float = RELOCATE_RESERVE_FRACTION
     candidate_relocate_limit_s: float = PER_CANDIDATE_RELOCATE_LIMIT_S
+    restart_best_two_opt: bool = False
     ils_enabled: bool = False
     ils_trigger_gap_pct: float = ITERATED_LOCAL_SEARCH_TRIGGER_GAP_PCT
     ils_block_width: int = ITERATED_LOCAL_SEARCH_BLOCK_SHIFT_WIDTH
@@ -76,9 +77,10 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
         ils_enabled=True,
     ),
     "rd100": SolverSpec(
-        solver_name="rd100_multistart",
+        solver_name="rd100_restart_best_two_opt",
         start_order="time_boxed",
         max_starts=4,
+        restart_best_two_opt=True,
         ils_enabled=False,
     ),
 }
@@ -345,6 +347,44 @@ def two_opt(instance: TSPInstance, tour: list[int], deadline: float) -> tuple[li
     return tour, {"two_opt_mode": mode, "passes": passes, "improvements": improvements}
 
 
+def best_improvement_two_opt(
+    instance: TSPInstance,
+    tour: list[int],
+    deadline: float,
+) -> tuple[list[int], dict[str, Any]]:
+    n = len(tour)
+    if n < 4 or time.perf_counter() >= deadline:
+        return tour, {"two_opt_mode": "skipped", "passes": 0, "improvements": 0}
+
+    passes = 0
+    improvements = 0
+    while time.perf_counter() < deadline:
+        best_move: tuple[int, int] | None = None
+        best_delta = 0
+        passes += 1
+        for i in range(n - 3):
+            a = tour[i]
+            b = tour[i + 1]
+            for j in range(i + 2, n):
+                if i == 0 and j == n - 1:
+                    continue
+                c = tour[j]
+                d = tour[(j + 1) % n]
+                delta = _two_opt_delta(instance, a, b, c, d)
+                if delta < best_delta:
+                    best_delta = delta
+                    best_move = (i, j)
+            if time.perf_counter() >= deadline:
+                return tour, {"two_opt_mode": "best_improvement_full", "passes": passes, "improvements": improvements}
+        if best_move is None:
+            break
+        i, j = best_move
+        tour[i + 1 : j + 1] = reversed(tour[i + 1 : j + 1])
+        improvements += 1
+
+    return tour, {"two_opt_mode": "best_improvement_full", "passes": passes, "improvements": improvements}
+
+
 def relocate(instance: TSPInstance, tour: list[int], deadline: float) -> tuple[list[int], dict[str, Any]]:
     n = len(tour)
     if n < 4 or time.perf_counter() >= deadline:
@@ -438,7 +478,14 @@ def solve_with_multistart(
         if time.perf_counter() >= restart_deadline:
             break
         candidate_tour = nearest_neighbor_tour(instance, start, restart_deadline)
-        candidate_tour, candidate_two_opt_meta = two_opt(instance, candidate_tour, restart_deadline)
+        if spec.restart_best_two_opt:
+            candidate_tour, candidate_two_opt_meta = best_improvement_two_opt(
+                instance,
+                candidate_tour,
+                restart_deadline,
+            )
+        else:
+            candidate_tour, candidate_two_opt_meta = two_opt(instance, candidate_tour, restart_deadline)
         candidate_relocate_meta = {"relocate_mode": "skipped", "relocate_moves": 0}
         if time.perf_counter() < restart_deadline:
             relocate_slice = min(
