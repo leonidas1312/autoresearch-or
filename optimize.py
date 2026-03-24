@@ -482,14 +482,6 @@ def solve_with_multistart(
             "final_relocate_mode": polish_relocate_meta["relocate_mode"],
             "final_relocate_moves": polish_relocate_meta["relocate_moves"],
         }
-    if time.perf_counter() < deadline:
-        best_tour, extra_two_opt_meta = two_opt(instance, best_tour, deadline)
-        if extra_two_opt_meta["two_opt_mode"] != "skipped":
-            final_two_opt_meta = {
-                "final_two_opt_mode": extra_two_opt_meta["two_opt_mode"],
-                "final_two_opt_passes": final_two_opt_meta["final_two_opt_passes"] + extra_two_opt_meta["passes"],
-                "final_two_opt_improvements": final_two_opt_meta["final_two_opt_improvements"] + extra_two_opt_meta["improvements"],
-            }
 
     return best_tour, {
         "construction": "multi_start_nearest_neighbor",
