@@ -28,6 +28,7 @@ PILOT_START_RANKING_MAX_S = 0.015
 class SolverSpec:
     solver_name: str
     start_order: str = "time_boxed"
+    max_starts: int | None = None
     restart_reserve_fraction: float = RELOCATE_RESERVE_FRACTION
     candidate_relocate_limit_s: float = PER_CANDIDATE_RELOCATE_LIMIT_S
     ils_enabled: bool = False
@@ -56,7 +57,11 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
     "eil51": SolverSpec(
         solver_name="eil51_ranked_multistart",
         start_order="pilot_ranked",
-        ils_enabled=False,
+        restart_reserve_fraction=0.15,
+        candidate_relocate_limit_s=0.0,
+        ils_enabled=True,
+        ils_trigger_gap_pct=0.0,
+        ils_block_width=5,
     ),
     "berlin52": SolverSpec(
         solver_name="berlin52_ranked_multistart",
@@ -71,6 +76,7 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
     "rd100": SolverSpec(
         solver_name="rd100_multistart",
         start_order="time_boxed",
+        max_starts=4,
         ils_enabled=False,
     ),
 }
@@ -410,6 +416,8 @@ def solve_with_multistart(
     else:
         starts = choose_start_nodes(instance, seed)
         start_order_mode = "anchor_nodes"
+    if spec.max_starts is not None:
+        starts = starts[: spec.max_starts]
 
     restart_deadline = deadline - (budget_s * spec.restart_reserve_fraction)
     best_tour: list[int] | None = None
