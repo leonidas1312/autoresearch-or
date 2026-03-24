@@ -76,10 +76,13 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
         ils_enabled=True,
     ),
     "rd100": SolverSpec(
-        solver_name="rd100_multistart",
+        solver_name="rd100_multistart_ils",
         start_order="time_boxed",
-        max_starts=4,
-        ils_enabled=False,
+        max_starts=8,
+        restart_reserve_fraction=0.18,
+        ils_enabled=True,
+        ils_trigger_gap_pct=0.0,
+        ils_block_width=10,
     ),
 }
 
