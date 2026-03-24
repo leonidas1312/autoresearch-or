@@ -4,6 +4,7 @@ import argparse
 import math
 import random
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import prepare
@@ -19,13 +20,66 @@ ITERATED_LOCAL_SEARCH_MIN_DIMENSION = 40
 ITERATED_LOCAL_SEARCH_MAX_DIMENSION = 90
 ITERATED_LOCAL_SEARCH_TRIGGER_GAP_PCT = 0.5
 ITERATED_LOCAL_SEARCH_BLOCK_SHIFT_WIDTH = 6
-SMALL_INSTANCE_BUDGET_WEIGHTS = {
+PILOT_START_RANKING_LIMIT = 64
+PILOT_START_RANKING_MAX_S = 0.015
+
+
+@dataclass(frozen=True, slots=True)
+class SolverSpec:
+    solver_name: str
+    start_order: str = "time_boxed"
+    restart_reserve_fraction: float = RELOCATE_RESERVE_FRACTION
+    candidate_relocate_limit_s: float = PER_CANDIDATE_RELOCATE_LIMIT_S
+    ils_enabled: bool = False
+    ils_trigger_gap_pct: float = ITERATED_LOCAL_SEARCH_TRIGGER_GAP_PCT
+    ils_block_width: int = ITERATED_LOCAL_SEARCH_BLOCK_SHIFT_WIDTH
+
+
+# The scheduler maps the fixed harness budget into per-benchmark solver budgets.
+SCHEDULER_BUDGET_WEIGHTS = {
     "att48": 0.40,
     "eil51": 0.16,
     "berlin52": 0.05,
     "pr76": 0.25,
     "rd100": 0.14,
 }
+
+
+# Small-tier benchmark solvers. Future experiments can change these solver specs,
+# replace them with other heuristics, or retune the scheduler above.
+BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
+    "att48": SolverSpec(
+        solver_name="att48_multistart_ils",
+        start_order="pilot_ranked",
+        ils_enabled=True,
+    ),
+    "eil51": SolverSpec(
+        solver_name="eil51_ranked_multistart",
+        start_order="pilot_ranked",
+        ils_enabled=False,
+    ),
+    "berlin52": SolverSpec(
+        solver_name="berlin52_ranked_multistart",
+        start_order="pilot_ranked",
+        ils_enabled=False,
+    ),
+    "pr76": SolverSpec(
+        solver_name="pr76_multistart_ils",
+        start_order="time_boxed",
+        ils_enabled=True,
+    ),
+    "rd100": SolverSpec(
+        solver_name="rd100_multistart",
+        start_order="time_boxed",
+        ils_enabled=False,
+    ),
+}
+
+DEFAULT_SOLVER_SPEC = SolverSpec(
+    solver_name="generic_multistart",
+    start_order="time_boxed",
+    ils_enabled=False,
+)
 
 
 def compute_tour_length(instance: TSPInstance, tour: list[int]) -> float:
@@ -64,10 +118,10 @@ def _distance(instance: TSPInstance, a: int, b: int) -> int:
 
 
 def allocate_instance_budget(instance: TSPInstance, budget_s: float) -> float:
-    weight = SMALL_INSTANCE_BUDGET_WEIGHTS.get(instance.name)
+    weight = SCHEDULER_BUDGET_WEIGHTS.get(instance.name)
     if weight is None:
         return budget_s
-    total_budget_s = budget_s * len(SMALL_INSTANCE_BUDGET_WEIGHTS)
+    total_budget_s = budget_s * len(SCHEDULER_BUDGET_WEIGHTS)
     return total_budget_s * weight
 
 
@@ -168,11 +222,40 @@ def nearest_neighbor_tour(instance: TSPInstance, start: int, deadline: float) ->
     return tour
 
 
-def block_shift_kick(tour: list[int], rng: random.Random) -> list[int]:
+def build_start_order(
+    instance: TSPInstance,
+    spec: SolverSpec,
+    seed: int,
+    deadline: float,
+) -> tuple[list[int], str]:
+    base_order = order_time_boxed_starts(instance, seed)
+    if spec.start_order != "pilot_ranked" or instance.dimension > PILOT_START_RANKING_LIMIT:
+        return base_order, spec.start_order
+
+    pilot_deadline = min(deadline, time.perf_counter() + PILOT_START_RANKING_MAX_S)
+    scored: list[tuple[float, int]] = []
+    seen: set[int] = set()
+    for start in base_order:
+        if time.perf_counter() >= pilot_deadline:
+            break
+        candidate_tour = nearest_neighbor_tour(instance, start, pilot_deadline)
+        scored.append((compute_tour_length(instance, candidate_tour), start))
+        seen.add(start)
+
+    if not scored:
+        return base_order, "pilot_ranked_fallback"
+
+    scored.sort()
+    ranked = [start for _, start in scored]
+    ranked.extend(start for start in base_order if start not in seen)
+    return ranked, "pilot_ranked"
+
+
+def block_shift_kick(tour: list[int], rng: random.Random, width: int) -> list[int]:
     n = len(tour)
     if n < 4:
         return tour[:]
-    width = min(ITERATED_LOCAL_SEARCH_BLOCK_SHIFT_WIDTH, n - 1)
+    width = min(width, n - 1)
     start = rng.randrange(0, n - width)
     block = tour[start : start + width]
     remainder = tour[:start] + tour[start + width :]
@@ -199,109 +282,13 @@ def sweep_tour(instance: TSPInstance) -> list[int]:
     return tour
 
 
-def construct_initial_solution(
-    instance: TSPInstance,
-    budget_s: float,
-    seed: int,
-    deadline: float,
-) -> tuple[list[int], dict[str, Any]]:
-    if instance.dimension > EXACT_NEAREST_NEIGHBOR_LIMIT:
-        return sweep_tour(instance), {"construction": "sweep", "starts": 1}
-
-    starts = choose_start_nodes(instance, seed)
-    best_tour: list[int] | None = None
-    best_objective = math.inf
-
-    for start in starts:
-        if time.perf_counter() >= deadline:
-            break
-        candidate_tour = nearest_neighbor_tour(instance, start, deadline)
-        candidate_objective = compute_tour_length(instance, candidate_tour)
-        if candidate_objective < best_objective:
-            best_tour = candidate_tour
-            best_objective = candidate_objective
-
-    if best_tour is None:
-        best_tour = list(range(instance.dimension))
-
-    return best_tour, {
-        "construction": "multi_start_nearest_neighbor",
-        "starts": len(starts),
-        "budget_s": budget_s,
-    }
-
-
-def solve_time_boxed_multi_start(
-    instance: TSPInstance,
-    budget_s: float,
-    seed: int,
-    deadline: float,
-) -> tuple[list[int], dict[str, Any], dict[str, Any]]:
-    starts = order_time_boxed_starts(instance, seed)
-    restart_deadline = deadline - (budget_s * RELOCATE_RESERVE_FRACTION)
-
-    best_tour: list[int] | None = None
-    best_objective = math.inf
-    best_start: int | None = None
-    best_local_search_meta = {"two_opt_mode": "skipped", "passes": 0, "improvements": 0}
-    final_two_opt_meta = {
-        "final_two_opt_mode": "skipped",
-        "final_two_opt_passes": 0,
-        "final_two_opt_improvements": 0,
-    }
-    relocate_meta = {"relocate_mode": "skipped", "relocate_moves": 0}
-    starts_tried = 0
-
-    for start in starts:
-        if time.perf_counter() >= restart_deadline:
-            break
-        candidate_tour = nearest_neighbor_tour(instance, start, restart_deadline)
-        candidate_tour, candidate_local_search_meta = two_opt(instance, candidate_tour, restart_deadline)
-        if time.perf_counter() < restart_deadline:
-            candidate_relocate_deadline = min(
-                restart_deadline,
-                time.perf_counter() + PER_CANDIDATE_RELOCATE_LIMIT_S,
-            )
-            candidate_tour, _ = relocate(
-                instance,
-                candidate_tour,
-                candidate_relocate_deadline,
-            )
-        candidate_objective = compute_tour_length(instance, candidate_tour)
-        starts_tried += 1
-        if candidate_objective < best_objective:
-            best_tour = candidate_tour[:]
-            best_objective = candidate_objective
-            best_start = start
-            best_local_search_meta = candidate_local_search_meta
-
-    if best_tour is None:
-        best_tour = list(range(instance.dimension))
-    elif time.perf_counter() < deadline:
-        best_tour, final_two_opt_result = two_opt(instance, best_tour, deadline)
-        final_two_opt_meta = {
-            "final_two_opt_mode": final_two_opt_result["two_opt_mode"],
-            "final_two_opt_passes": final_two_opt_result["passes"],
-            "final_two_opt_improvements": final_two_opt_result["improvements"],
-        }
-    if best_tour is not None and time.perf_counter() < deadline:
-        best_tour, relocate_meta = relocate(instance, best_tour, deadline)
-
-    return (
-        best_tour,
-        {
-            "construction": "time_boxed_random_start_nearest_neighbor",
-            "candidate_starts": len(starts),
-            "starts_tried": starts_tried,
-            "best_start": best_start,
-            "budget_s": budget_s,
-        },
-        {**best_local_search_meta, **final_two_opt_meta, **relocate_meta},
-    )
-
-
 def _two_opt_delta(instance: TSPInstance, a: int, b: int, c: int, d: int) -> int:
-    return _distance(instance, a, c) + _distance(instance, b, d) - _distance(instance, a, b) - _distance(instance, c, d)
+    return (
+        _distance(instance, a, c)
+        + _distance(instance, b, d)
+        - _distance(instance, a, b)
+        - _distance(instance, c, d)
+    )
 
 
 def two_opt(instance: TSPInstance, tour: list[int], deadline: float) -> tuple[list[int], dict[str, Any]]:
@@ -364,13 +351,21 @@ def relocate(instance: TSPInstance, tour: list[int], deadline: float) -> tuple[l
             prev_i = tour[i - 1]
             node = tour[i]
             next_i = tour[(i + 1) % n]
-            remove_delta = _distance(instance, prev_i, next_i) - _distance(instance, prev_i, node) - _distance(instance, node, next_i)
+            remove_delta = (
+                _distance(instance, prev_i, next_i)
+                - _distance(instance, prev_i, node)
+                - _distance(instance, node, next_i)
+            )
             for j in range(n):
                 if j == i or j == (i - 1) % n:
                     continue
                 a = tour[j]
                 b = tour[(j + 1) % n]
-                insert_delta = _distance(instance, a, node) + _distance(instance, node, b) - _distance(instance, a, b)
+                insert_delta = (
+                    _distance(instance, a, node)
+                    + _distance(instance, node, b)
+                    - _distance(instance, a, b)
+                )
                 delta = remove_delta + insert_delta
                 if delta < best_delta:
                     best_delta = delta
@@ -389,64 +384,203 @@ def relocate(instance: TSPInstance, tour: list[int], deadline: float) -> tuple[l
     return tour, {"relocate_mode": "best_improvement", "relocate_moves": moves}
 
 
+def prefix_meta(meta: dict[str, Any], prefix: str) -> dict[str, Any]:
+    return {f"{prefix}{key}": value for key, value in meta.items()}
+
+
+def solve_with_multistart(
+    instance: TSPInstance,
+    spec: SolverSpec,
+    budget_s: float,
+    seed: int,
+    deadline: float,
+) -> tuple[list[int], dict[str, Any]]:
+    if instance.dimension > EXACT_NEAREST_NEIGHBOR_LIMIT:
+        return sweep_tour(instance), {
+            "construction": "sweep",
+            "solver_name": spec.solver_name,
+            "start_order_mode": "sweep",
+            "candidate_starts": 1,
+            "starts_tried": 1,
+            "best_start": None,
+        }
+
+    if instance.dimension <= TIME_BOXED_MULTI_START_LIMIT:
+        starts, start_order_mode = build_start_order(instance, spec, seed, deadline)
+    else:
+        starts = choose_start_nodes(instance, seed)
+        start_order_mode = "anchor_nodes"
+
+    restart_deadline = deadline - (budget_s * spec.restart_reserve_fraction)
+    best_tour: list[int] | None = None
+    best_objective = math.inf
+    best_start: int | None = None
+    starts_tried = 0
+    best_local_search_meta = {
+        "restart_two_opt_mode": "skipped",
+        "restart_passes": 0,
+        "restart_improvements": 0,
+        "restart_relocate_mode": "skipped",
+        "restart_relocate_moves": 0,
+    }
+
+    for start_index, start in enumerate(starts):
+        if time.perf_counter() >= restart_deadline:
+            break
+        candidate_tour = nearest_neighbor_tour(instance, start, restart_deadline)
+        candidate_tour, candidate_two_opt_meta = two_opt(instance, candidate_tour, restart_deadline)
+        candidate_relocate_meta = {"relocate_mode": "skipped", "relocate_moves": 0}
+        if time.perf_counter() < restart_deadline:
+            relocate_slice = min(
+                spec.candidate_relocate_limit_s,
+                max(0.0, restart_deadline - time.perf_counter()),
+            )
+            if relocate_slice > 0.0:
+                candidate_relocate_meta = {"relocate_mode": "best_improvement", "relocate_moves": 0}
+                candidate_tour, candidate_relocate_meta = relocate(
+                    instance,
+                    candidate_tour,
+                    min(restart_deadline, time.perf_counter() + relocate_slice),
+                )
+        candidate_objective = compute_tour_length(instance, candidate_tour)
+        starts_tried += 1
+        if candidate_objective < best_objective:
+            best_tour = candidate_tour[:]
+            best_objective = candidate_objective
+            best_start = start
+            best_local_search_meta = {
+                **prefix_meta(candidate_two_opt_meta, "restart_"),
+                **prefix_meta(candidate_relocate_meta, "restart_"),
+            }
+
+    if best_tour is None:
+        best_tour = list(range(instance.dimension))
+
+    final_two_opt_meta = {"final_two_opt_mode": "skipped", "final_two_opt_passes": 0, "final_two_opt_improvements": 0}
+    final_relocate_meta = {"final_relocate_mode": "skipped", "final_relocate_moves": 0}
+
+    if time.perf_counter() < deadline:
+        best_tour, polish_two_opt_meta = two_opt(instance, best_tour, deadline)
+        final_two_opt_meta = {
+            "final_two_opt_mode": polish_two_opt_meta["two_opt_mode"],
+            "final_two_opt_passes": polish_two_opt_meta["passes"],
+            "final_two_opt_improvements": polish_two_opt_meta["improvements"],
+        }
+    if time.perf_counter() < deadline:
+        best_tour, polish_relocate_meta = relocate(instance, best_tour, deadline)
+        final_relocate_meta = {
+            "final_relocate_mode": polish_relocate_meta["relocate_mode"],
+            "final_relocate_moves": polish_relocate_meta["relocate_moves"],
+        }
+
+    return best_tour, {
+        "construction": "multi_start_nearest_neighbor",
+        "solver_name": spec.solver_name,
+        "start_order_mode": start_order_mode,
+        "candidate_starts": len(starts),
+        "starts_tried": starts_tried,
+        "best_start": best_start,
+        "allocated_budget_s": budget_s,
+        **best_local_search_meta,
+        **final_two_opt_meta,
+        **final_relocate_meta,
+    }
+
+
+def run_ils(
+    instance: TSPInstance,
+    spec: SolverSpec,
+    incumbent_tour: list[int],
+    incumbent_objective: float,
+    seed: int,
+    deadline: float,
+) -> tuple[list[int], float, dict[str, Any]]:
+    if not spec.ils_enabled or time.perf_counter() >= deadline:
+        return incumbent_tour, incumbent_objective, {
+            "ils_mode": "skipped",
+            "ils_iterations": 0,
+            "ils_improvements": 0,
+        }
+
+    if instance.dimension < ITERATED_LOCAL_SEARCH_MIN_DIMENSION:
+        return incumbent_tour, incumbent_objective, {
+            "ils_mode": "skipped_small_dimension",
+            "ils_iterations": 0,
+            "ils_improvements": 0,
+        }
+
+    if instance.best_known is not None:
+        trigger_objective = instance.best_known * (1.0 + (spec.ils_trigger_gap_pct / 100.0))
+        if incumbent_objective <= trigger_objective:
+            return incumbent_tour, incumbent_objective, {
+                "ils_mode": "skipped_below_trigger",
+                "ils_iterations": 0,
+                "ils_improvements": 0,
+            }
+
+    rng = random.Random(seed)
+    best_tour = incumbent_tour[:]
+    best_objective = incumbent_objective
+    iterations = 0
+    improvements = 0
+
+    while time.perf_counter() < deadline:
+        candidate_tour = block_shift_kick(best_tour, rng, spec.ils_block_width)
+        candidate_tour, _ = two_opt(instance, candidate_tour, deadline)
+        if time.perf_counter() < deadline:
+            candidate_tour, _ = relocate(instance, candidate_tour, deadline)
+        if time.perf_counter() < deadline:
+            candidate_tour, _ = two_opt(instance, candidate_tour, deadline)
+        candidate_objective = compute_tour_length(instance, candidate_tour)
+        iterations += 1
+        if candidate_objective < best_objective:
+            best_tour = candidate_tour
+            best_objective = candidate_objective
+            improvements += 1
+
+    return best_tour, best_objective, {
+        "ils_mode": "block_shift",
+        "ils_iterations": iterations,
+        "ils_improvements": improvements,
+    }
+
+
+def solver_spec_for(instance: TSPInstance) -> SolverSpec:
+    return BENCHMARK_SOLVERS.get(instance.name, DEFAULT_SOLVER_SPEC)
+
+
 def solve_instance(instance: TSPInstance, budget_s: float, seed: int) -> dict[str, Any]:
     started = time.perf_counter()
     effective_budget = max(0.01, allocate_instance_budget(instance, budget_s))
     deadline = started + effective_budget
+    spec = solver_spec_for(instance)
 
-    if instance.dimension <= TIME_BOXED_MULTI_START_LIMIT:
-        improved_tour, construction_meta, local_search_meta = solve_time_boxed_multi_start(
-            instance,
-            effective_budget,
-            seed,
-            deadline,
-        )
-    else:
-        initial_tour, construction_meta = construct_initial_solution(
-            instance,
-            effective_budget,
-            seed,
-            deadline,
-        )
-        improved_tour, local_search_meta = two_opt(instance, initial_tour, deadline)
-    objective = compute_tour_length(instance, improved_tour)
-    ils_iterations = 0
-    ils_improvements = 0
-
-    if (
-        ITERATED_LOCAL_SEARCH_MIN_DIMENSION <= instance.dimension <= ITERATED_LOCAL_SEARCH_MAX_DIMENSION
-        and instance.best_known is not None
-        and objective > instance.best_known * (1.0 + (ITERATED_LOCAL_SEARCH_TRIGGER_GAP_PCT / 100.0))
-        and time.perf_counter() < deadline
-    ):
-        rng = random.Random(seed)
-        best_tour = improved_tour[:]
-        best_objective = objective
-        while time.perf_counter() < deadline:
-            candidate_tour = block_shift_kick(best_tour, rng)
-            candidate_tour, _ = two_opt(instance, candidate_tour, deadline)
-            if time.perf_counter() < deadline:
-                candidate_tour, _ = relocate(instance, candidate_tour, deadline)
-            if time.perf_counter() < deadline:
-                candidate_tour, _ = two_opt(instance, candidate_tour, deadline)
-            candidate_objective = compute_tour_length(instance, candidate_tour)
-            ils_iterations += 1
-            if candidate_objective < best_objective:
-                best_tour = candidate_tour
-                best_objective = candidate_objective
-                ils_improvements += 1
-        improved_tour = best_tour
-        objective = best_objective
+    incumbent_tour, solver_meta = solve_with_multistart(
+        instance,
+        spec,
+        effective_budget,
+        seed,
+        deadline,
+    )
+    incumbent_objective = compute_tour_length(instance, incumbent_tour)
+    incumbent_tour, incumbent_objective, ils_meta = run_ils(
+        instance,
+        spec,
+        incumbent_tour,
+        incumbent_objective,
+        seed,
+        deadline,
+    )
 
     return {
-        "solution": improved_tour,
-        "objective": objective,
+        "solution": incumbent_tour,
+        "objective": incumbent_objective,
         "metadata": {
-            **construction_meta,
-            **local_search_meta,
+            **solver_meta,
+            **ils_meta,
             "elapsed_s": time.perf_counter() - started,
-            "ils_iterations": ils_iterations,
-            "ils_improvements": ils_improvements,
+            "scheduler_budget_s": effective_budget,
+            "scheduler_base_budget_s": budget_s,
             "seed": seed,
         },
     }
