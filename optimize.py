@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import argparse
-import csv
-import json
 import math
 import random
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import prepare
@@ -40,30 +37,12 @@ class SolverSpec:
 
 
 # The scheduler maps the fixed harness budget into per-benchmark solver budgets.
-SCHEDULER_BUDGET_WEIGHTS_BY_SIZE = {
-    "small": {
-        "att48": 0.38,
-        "eil51": 0.16,
-        "berlin52": 0.05,
-        "pr76": 0.25,
-        "rd100": 0.16,
-    },
-    # Medium uses a 1-second total budget, so the two gap-scored instances get
-    # just enough time to stay stable while more time flows to the largest raw-objective cases.
-    "medium": {
-        "lin318": 0.10,
-        "pcb442": 0.06,
-        "rat783": 0.08,
-        "pr1002": 0.06,
-        "nrw1379": 0.30,
-        "pcb3038": 0.40,
-    },
-}
-
-INSTANCE_SIZE_BY_NAME = {
-    instance_name: size
-    for size, instance_names in prepare.BENCHMARK_TIERS.items()
-    for instance_name in instance_names
+SCHEDULER_BUDGET_WEIGHTS = {
+    "att48": 0.40,
+    "eil51": 0.16,
+    "berlin52": 0.05,
+    "pr76": 0.25,
+    "rd100": 0.14,
 }
 
 
@@ -92,8 +71,6 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
     "pr76": SolverSpec(
         solver_name="pr76_multistart_ils",
         start_order="time_boxed",
-        max_starts=6,
-        restart_reserve_fraction=0.15,
         ils_enabled=True,
     ),
     "rd100": SolverSpec(
@@ -109,8 +86,6 @@ DEFAULT_SOLVER_SPEC = SolverSpec(
     start_order="time_boxed",
     ils_enabled=False,
 )
-
-RESULTS_TSV_HEADER = "commit\tscore\truntime_s\tstatus\tdescription\n"
 
 
 def compute_tour_length(instance: TSPInstance, tour: list[int]) -> float:
@@ -149,41 +124,16 @@ def _distance(instance: TSPInstance, a: int, b: int) -> int:
 
 
 def allocate_instance_budget(instance: TSPInstance, budget_s: float) -> float:
-    size = INSTANCE_SIZE_BY_NAME.get(instance.name)
-    if size is None:
-        return budget_s
-    weights = SCHEDULER_BUDGET_WEIGHTS_BY_SIZE.get(size)
-    if not weights:
-        return budget_s
-    weight = weights.get(instance.name)
+    weight = SCHEDULER_BUDGET_WEIGHTS.get(instance.name)
     if weight is None:
         return budget_s
-    total_budget_s = budget_s * len(prepare.BENCHMARK_TIERS[size])
+    total_budget_s = budget_s * len(SCHEDULER_BUDGET_WEIGHTS)
     return total_budget_s * weight
 
 
 def choose_start_nodes(instance: TSPInstance, seed: int) -> list[int]:
     n = instance.dimension
-    if n <= 1_000:
-        anchor_nodes = [0, n // 4, n // 2, (3 * n) // 4, n - 1]
-    else:
-        xs = [x for x, _ in instance.coords]
-        ys = [y for _, y in instance.coords]
-        centroid_x = sum(xs) / n
-        centroid_y = sum(ys) / n
-        anchor_nodes = [
-            min(range(n), key=lambda node: (xs[node], node)),
-            max(range(n), key=lambda node: (xs[node], -node)),
-            min(range(n), key=lambda node: (ys[node], node)),
-            max(range(n), key=lambda node: (ys[node], -node)),
-            max(
-                range(n),
-                key=lambda node: (
-                    (xs[node] - centroid_x) ** 2 + (ys[node] - centroid_y) ** 2,
-                    -node,
-                ),
-            ),
-        ]
+    anchor_nodes = [0, n // 4, n // 2, (3 * n) // 4, n - 1]
     rng = random.Random(seed)
     candidates = [node for node in anchor_nodes if 0 <= node < n]
 
@@ -644,109 +594,6 @@ def solve_instance(instance: TSPInstance, budget_s: float, seed: int) -> dict[st
     }
 
 
-def _artifact_key(artifact: dict[str, Any]) -> tuple[str, str, str]:
-    aggregate_metrics = artifact["aggregate_metrics"]
-    return (
-        str(artifact.get("commit", "nogit")),
-        f"{aggregate_metrics['score']:.6f}",
-        f"{aggregate_metrics['total_runtime_s']:.3f}",
-    )
-
-
-def load_results_row_index(path: Path | None) -> dict[tuple[str, str, str], list[dict[str, str]]]:
-    if path is None or not path.exists():
-        return {}
-
-    indexed_rows: dict[tuple[str, str, str], list[dict[str, str]]] = {}
-    with path.open("r", encoding="utf-8", newline="") as handle:
-        reader = csv.DictReader(handle, delimiter="\t")
-        for row in reader:
-            key = (row["commit"], row["score"], row["runtime_s"])
-            indexed_rows.setdefault(key, []).append(row)
-    return indexed_rows
-
-
-def rebuild_results_rows(
-    artifacts_path: Path,
-    reference_results_tsv: Path | None = None,
-) -> tuple[list[str], dict[str, int]]:
-    if artifacts_path.is_file():
-        artifact_paths = [artifacts_path]
-    else:
-        artifact_paths = sorted(path for path in artifacts_path.rglob("*.json") if path.is_file())
-    if not artifact_paths:
-        raise ValueError(f"No artifact JSON files found under {artifacts_path}")
-
-    legacy_rows = load_results_row_index(reference_results_tsv)
-    rebuilt_rows = [RESULTS_TSV_HEADER]
-    stats = {
-        "artifacts": 0,
-        "embedded_metadata": 0,
-        "backfilled_from_results_tsv": 0,
-        "legacy_unknown": 0,
-    }
-
-    for artifact_path in artifact_paths:
-        artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
-        status = artifact.get("status")
-        description = artifact.get("description")
-        if status is not None and description is not None:
-            stats["embedded_metadata"] += 1
-        else:
-            legacy_matches = legacy_rows.get(_artifact_key(artifact))
-            if legacy_matches:
-                matched_row = legacy_matches.pop(0)
-                status = status or matched_row["status"]
-                description = description or matched_row["description"]
-                stats["backfilled_from_results_tsv"] += 1
-            else:
-                status = status or "unknown"
-                description = description or f"recreated from {artifact_path.name}"
-                stats["legacy_unknown"] += 1
-
-        rebuilt_rows.append(
-            "\t".join(
-                (
-                    str(artifact.get("commit", "nogit")),
-                    f"{artifact['aggregate_metrics']['score']:.6f}",
-                    f"{artifact['aggregate_metrics']['total_runtime_s']:.3f}",
-                    status.replace("\t", " ").strip(),
-                    description.replace("\t", " ").strip(),
-                )
-            )
-            + "\n"
-        )
-        stats["artifacts"] += 1
-
-    return rebuilt_rows, stats
-
-
-def write_rebuilt_results_tsv(
-    artifacts_path: Path,
-    output_path: Path,
-    reference_results_tsv: Path | None = None,
-) -> dict[str, int]:
-    rows, stats = rebuild_results_rows(artifacts_path, reference_results_tsv)
-    output_path.write_text("".join(rows), encoding="utf-8")
-    return stats
-
-
-def annotate_artifact(artifact: dict[str, Any], *, status: str, description: str) -> dict[str, Any]:
-    artifact["status"] = status
-    artifact["description"] = description
-    return artifact
-
-
-def move_artifact_to_size_dir(artifact_path: Path, size: str) -> Path:
-    target_dir = artifact_path.parent / size
-    target_dir.mkdir(parents=True, exist_ok=True)
-    target_path = target_dir / artifact_path.name
-    if artifact_path.resolve() == target_path.resolve():
-        return artifact_path
-    artifact_path.replace(target_path)
-    return target_path
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run one local TSP heuristic benchmark.")
     parser.add_argument("--size", choices=tuple(prepare.BENCHMARK_TIERS), default="small")
@@ -754,21 +601,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--status", choices=("baseline", "keep", "discard", "crash"), default="baseline")
     parser.add_argument("--description", default="baseline")
-    parser.add_argument(
-        "--rebuild-results-tsv-from",
-        type=Path,
-        help="Rebuild a results TSV from an artifact JSON file or directory instead of running the solver.",
-    )
-    parser.add_argument(
-        "--output-results-tsv",
-        type=Path,
-        help="Path to write the rebuilt results TSV. Required with --rebuild-results-tsv-from.",
-    )
-    parser.add_argument(
-        "--reference-results-tsv",
-        type=Path,
-        help="Optional existing results.tsv used only to backfill legacy artifacts missing status/description.",
-    )
     return parser.parse_args()
 
 
@@ -791,21 +623,6 @@ def print_run_summary(artifact: dict[str, Any], artifact_path: str, status: str)
 
 def main() -> int:
     args = parse_args()
-    if args.rebuild_results_tsv_from is not None:
-        if args.output_results_tsv is None:
-            raise SystemExit("--output-results-tsv is required with --rebuild-results-tsv-from")
-        stats = write_rebuilt_results_tsv(
-            artifacts_path=args.rebuild_results_tsv_from,
-            output_path=args.output_results_tsv,
-            reference_results_tsv=args.reference_results_tsv,
-        )
-        print(f"[recreate] artifacts={stats['artifacts']}")
-        print(f"[recreate] embedded_metadata={stats['embedded_metadata']}")
-        print(f"[recreate] backfilled_from_results_tsv={stats['backfilled_from_results_tsv']}")
-        print(f"[recreate] legacy_unknown={stats['legacy_unknown']}")
-        print(f"[recreate] output={args.output_results_tsv}")
-        return 0
-
     instances = prepare.load_benchmark_instances(args.size, verbose=True)
     if not instances:
         return 0
@@ -821,13 +638,11 @@ def main() -> int:
             budget_s=args.budget,
             seed=args.seed,
         )
-        annotate_artifact(artifact, status=args.status, description=args.description)
         artifact_path = prepare.record_run(
             artifact,
             status=args.status,
             description=args.description,
         )
-        artifact_path = move_artifact_to_size_dir(artifact_path, args.size)
     except Exception as exc:
         crash_artifact = prepare.build_crash_artifact(
             size=args.size,
@@ -837,13 +652,11 @@ def main() -> int:
             total_runtime_s=time.perf_counter() - run_started,
             error=str(exc),
         )
-        annotate_artifact(crash_artifact, status="crash", description=args.description)
         artifact_path = prepare.record_run(
             crash_artifact,
             status="crash",
             description=args.description,
         )
-        artifact_path = move_artifact_to_size_dir(artifact_path, args.size)
         print(f"[run] status=crash")
         print(f"[run] error={exc}")
         print(f"[run] artifact={artifact_path}")

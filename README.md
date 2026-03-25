@@ -30,14 +30,14 @@ Requirements: Python 3.11+ and git. No external services are required, and the b
 # 1. Inspect the available local benchmark tiers
 python3 prepare.py --list
 
-# 2. Run a single default experiment on the small tier
-python3 optimize.py
+# 2. Run a single 1-second experiment on the small tier
+python3 optimize.py --budget 1 --description "small baseline"
 
 # 3. Run a medium-tier experiment
 python3 optimize.py --size medium --budget 1 --seed 0 --description "medium baseline"
 
-# 4. Inspect the logged results
-sed -n '1,20p' results.tsv
+# 4. Inspect the most recent logged results
+tail -n 20 results.tsv
 ```
 
 If those commands work, the local setup is working and the repository is ready for iterative experiments.
