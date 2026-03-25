@@ -52,11 +52,11 @@ SCHEDULER_BUDGET_WEIGHTS_BY_SIZE = {
     # just enough time to stay stable while more time flows to the largest raw-objective cases.
     "medium": {
         "lin318": 0.10,
-        "pcb442": 0.06,
-        "rat783": 0.08,
-        "pr1002": 0.06,
-        "nrw1379": 0.30,
-        "pcb3038": 0.40,
+        "pcb442": 0.05,
+        "rat783": 0.07,
+        "pr1002": 0.05,
+        "nrw1379": 0.29,
+        "pcb3038": 0.44,
     },
 }
 
