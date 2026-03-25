@@ -164,7 +164,7 @@ def allocate_instance_budget(instance: TSPInstance, budget_s: float) -> float:
 
 def choose_start_nodes(instance: TSPInstance, seed: int) -> list[int]:
     n = instance.dimension
-    if n <= 1_300:
+    if n <= 1_000:
         anchor_nodes = [0, n // 4, n // 2, (3 * n) // 4, n - 1]
     else:
         xs = [x for x, _ in instance.coords]
