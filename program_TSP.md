@@ -21,6 +21,7 @@ What you CAN do:
 - change the solver assigned to any benchmark inside `optimize.py`
 - add or remove benchmark-specific solver specs inside `optimize.py`
 - refactor `optimize.py` so the scheduler and solver registry are clearer
+- FULLY modify the logic of `optimize.py`
 
 What you CANNOT do:
 - modify `prepare.py`

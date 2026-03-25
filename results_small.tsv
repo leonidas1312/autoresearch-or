@@ -1,0 +1,132 @@
+commit	score	runtime_s	status	description
+1b67222	1.666821	0.937	baseline	baseline small 1s solver
+75ac5ae	1.442885	0.929	keep	polish restart candidates with relocate
+75ac5ae	1.113909	0.934	keep	polish restart candidates with relocate
+d4e2869	1.113909	0.939	discard	angle-order larger small-instance starts
+d4e2869	0.952850	0.924	keep	angle-order larger small-instance starts
+3468db6	0.952850	0.925	discard	probe angular quantiles before full start sweep
+3468db6	0.852804	0.912	keep	probe angular quantiles before full start sweep
+e4f7842	0.852804	0.911	discard	cache small-instance distance matrices
+e4f7842	0.577204	0.921	keep	cache small-instance distance matrices
+8c7bc5b	0.577204	0.920	discard	prioritize angular wrap endpoint starts
+8c7bc5b	0.516986	0.921	keep	prioritize angular wrap endpoint starts
+5ba2c10	0.516986	0.920	discard	re-run two-opt after candidate relocate
+499e430	0.516986	0.917	discard	ignore local run artifacts and log failed experiments
+30b3b12	0.998014	0.910	discard	relocate only incumbent restart candidates
+9e70f4b	1.023044	0.913	discard	use best-improvement full 2-opt passes
+e21dc29	0.482222	0.918	keep	sample angular sector midpoints first
+5df23ae	0.465286	0.953	keep	add double-bridge iterated local search
+97f7e23	0.363667	0.974	keep	reallocate small-tier instance budgets
+cc6a464	0.316622	0.978	keep	tighten small-tier budget remap
+f26881e	0.236185	0.978	keep	use block-shift perturbations in ILS
+b2843eb	0.512182	0.973	discard	use narrower ILS block shifts
+162e663	0.183484	0.977	keep	retune budgets for narrower block shifts
+95bfb41	0.512182	0.973	discard	front-load strong eil51 starts
+29ce10f	0.183484	0.982	discard	use double-bridge ILS kicks for rd100 scale
+985d875	0.230433	0.982	discard	"revert ""Use double-bridge ILS kicks for rd100 scale"""
+c05d3bd	0.221734	0.982	discard	target rd100 with bounded 3-opt cleanup
+94c4720	0.518654	0.973	discard	refactor optimize into scheduler and solver registry
+94c4720	0.183484	0.978	baseline	small 1s baseline seed0
+303d4e1	0.183484	0.981	discard	solver: reduce rd100 relocate slice to 0.003s
+64b64e8	0.189956	0.960	discard	scheduler: shift budget from att48/pr76 to rd100
+c1eb30b	0.220282	0.982	discard	solver: add targeted rd100 3-opt cleanup
+629cc2a	0.465234	0.991	discard	solver: retune eil51 to reserve ILS polish
+efd7f51	0.136536	0.993	keep	both: retune eil51 polish and cap rd100 restart starts
+26c3762	0.143008	0.995	discard	solver: use fixed rd100 restart list
+e5f3ceb	0.471706	0.991	baseline	small 1s current baseline recheck
+b38186a	0.548980	0.993	discard	solver: retune rd100 for fewer restarts and more polish
+ac8a56c	0.465234	0.988	discard	solver: retune pr76 for fewer starts and more polish
+8711b2e	0.471706	0.989	baseline	small 1s baseline before 10-exp batch
+86cc864	0.465234	0.991	keep	solver: cap pr76 restarts at 8
+476cdd6	0.465234	0.990	discard	solver: cap pr76 restarts at 6
+4c94fa4	0.465234	0.988	discard	solver: reserve more polish time for pr76
+ff907e5	0.136536	0.997	keep	solver: retune pr76 to 6 starts with more polish
+869c742	0.465234	0.991	discard	solver: increase pr76 polish reserve
+e16d7a9	0.465234	0.992	discard	solver: broaden pr76 starts and trim relocate slice
+299c1f4	0.465234	0.991	discard	solver: cap rd100 restarts at 3
+7b63cb0	0.465234	0.988	discard	solver: cap rd100 restarts at 2
+8bb88de	0.136536	0.996	discard	scheduler: shift small-tier budget modestly toward rd100
+11f92bf	0.136536	0.993	discard	scheduler: shift more small-tier budget toward rd100
+93a4436	0.465234	0.991	baseline	post-batch baseline recheck
+38287d7	0.136536	0.993	keep	scheduler: shift small-tier budget to rd100 by 0.02
+f68d15a	0.290771	0.997	discard	scheduler: shift small-tier budget to rd100 by 0.04
+f5f0f80	0.136536	0.991	discard	solver: cap rd100 restarts at 3 under shifted scheduler
+61edef3	0.136536	0.973	discard	solver: cap rd100 restarts at 2 under shifted scheduler
+cf3b6c3	0.136536	0.997	discard	solver: use 8 pr76 starts with low relocate slice
+c67590d	0.136536	0.993	discard	solver: use 8 pr76 starts with current polish reserve
+fa3fb72	0.290771	0.997	discard	solver: reduce rd100 restart reserve under shifted scheduler
+0e111ee	0.136536	0.991	discard	solver: cap att48 restarts at 32
+0306ce9	0.136536	0.992	discard	solver: cap att48 restarts at 24
+6aa7ccb	0.295828	0.997	discard	solver: cap att48 restarts at 16
+b9632d1	0.183582	0.992	discard	solver: cap att48 restarts at 8
+42b9f1a	0.136536	0.992	discard	solver: add fifth rd100 restart under shifted scheduler
+9b2199c	0.136536	0.988	discard	solver: reserve more rd100 polish time under shifted scheduler
+0810634	0.136536	0.997	discard	solver: enable rd100 ILS under shifted scheduler
+51cf5bf	0.465234	0.997	discard	solver: add tiny rd100 relocate slices under shifted scheduler
+8d182c6	0.465234	0.993	discard	solver: pilot-rank rd100 starts under shifted scheduler
+99bb998	0.183484	0.992	discard	solver: narrow eil51 ILS kick width under shifted scheduler
+f35ee28	0.136536	0.992	discard	solver: trim eil51 polish reserve under shifted scheduler
+ffb0cad	0.311834	0.992	discard	solver: cap pr76 restarts at 5 under shifted scheduler
+2aa0b4e	0.136536	0.991	discard	scheduler: shift 0.01 budget from berlin52 to rd100
+b19dbb1	0.136536	0.992	discard	both: increase pilot ranking window to 0.020s
+5a36334	0.136536	0.993	discard	both: reduce pilot ranking window to 0.010s
+7560b1b	0.136536	0.992	discard	both: disable pilot ranking for berlin52
+1af51ea	0.353254	0.997	discard	both: pilot-rank pr76 starts
+eda2576	0.136536	0.993	discard	solver: raise rd100 restart cap to 6
+e3b348a	0.136536	0.997	discard	solver: remove rd100 restart cap
+08939c8	0.136536	0.988	discard	solver: set rd100 polish reserve to 0.12
+b6acda0	0.136536	0.997	discard	both: add post-relocate final 2-opt pass
+ccddd33	0.136536	0.997	discard	both: swap final polish order to relocate then 2-opt
+bd3ad3e	0.136536	0.993	discard	both: raise full 2-opt pass cap to 60
+5843d4e	0.465234	0.985	discard	both: lower full 2-opt pass cap to 40
+fa4621d	0.465234	0.995	discard	solver: add 0.001s rd100 relocate slices
+90a7124	0.136536	0.997	discard	solver: enable rd100 ILS with block width 4
+2c1261f	0.136536	0.997	discard	solver: enable rd100 ILS with block width 8
+1e3b76a	0.687392	0.992	discard	both: densify time-boxed angular quantiles
+808e753	0.393935	0.997	discard	both: sparsify time-boxed angular quantiles
+f7527c6	1.061444	0.996	discard	both: use anchor-node starts for rd100
+63df767	0.393935	0.992	discard	solver: add 0.005s pr76 relocate slices
+dc78edb	0.393935	0.991	discard	solver: trim pr76 polish reserve to 0.12
+3a72555	0.393935	0.991	discard	scheduler: shift 0.01 budget from att48 to rd100
+ebf69a1	0.136536	0.992	baseline	restored baseline after reverting stray sparsify change
+3b2d841	0.136536	0.997	discard	solver: use rd100 double-bridge ILS
+2497422	0.136536	0.997	discard	solver: use rd100 double-bridge ILS with 3 restarts
+fba38b5	0.465234	0.997	discard	solver: use rd100 double-bridge ILS with 2 restarts
+cfb0874	0.136536	0.997	discard	solver: add rd100 final Or-opt-2 polish
+490989f	0.136536	0.995	discard	solver: add rd100 final Or-opt-3 polish
+2e777f1	0.136536	0.993	discard	solver: add rd100 final best-improvement 2-opt
+bbbe484	0.664981	0.986	discard	solver: use rd100 restart best-improvement 2-opt
+8add38d	0.927939	0.989	discard	solver: use reversed time-boxed starts for rd100
+74d4e74	0.510746	0.997	discard	solver: use centroid-radius starts for rd100
+fa0a937	0.968394	0.986	discard	solver: use x-extreme starts for rd100
+c0a33a6	0.518331	0.997	discard	solver: use y-extreme starts for rd100
+4ef103e	0.495575	0.986	discard	solver: use shuffled starts for rd100
+e4229e4	0.136536	0.992	discard	solver: raise rd100 restart cap to 8
+9a555ef	0.136536	0.992	discard	solver: raise rd100 restart cap to 10
+6fa7147	0.136536	0.979	discard	solver: raise rd100 polish reserve to 0.18
+2b2160c	0.465234	0.961	discard	solver: raise rd100 polish reserve to 0.25
+36a5328	0.465234	0.995	discard	solver: add 0.002s rd100 relocate slices
+f51bbd1	0.136536	0.997	discard	solver: add 0.005s rd100 relocate slices
+239f7c8	0.136536	0.997	discard	solver: use rd100 ILS with block width 2
+b4ffe2f	0.136536	0.997	discard	solver: use rd100 ILS with block width 10
+b0a9838	0.136536	0.993	baseline	final rd100-only batch baseline recheck
+507b23c	0.136536	0.980	discard	solver: use rd100 8 starts with 0.18 reserve
+cf40ac2	0.465234	0.976	discard	solver: use rd100 10 starts with 0.18 reserve
+b5f92bc	0.136536	0.997	discard	solver: use rd100 8 starts with 0.005s relocate
+ceca72f	0.136536	0.996	discard	solver: use rd100 10 starts with 0.005s relocate
+59263cb	0.136536	0.984	discard	solver: use rd100 0.18 reserve with 0.005s relocate
+d999054	0.136536	0.997	discard	solver: use rd100 8 starts with ILS width 2
+ec9f6e2	0.136536	0.997	discard	solver: use rd100 8 starts with ILS width 10
+53e83cf	0.136536	0.997	discard	solver: use rd100 0.18 reserve with ILS width 2
+0602983	0.136536	0.997	discard	solver: use rd100 0.18 reserve with ILS width 10
+ee66834	0.136536	0.997	discard	solver: use rd100 8 starts 0.18 reserve with ILS width 2
+6a6b0ed	0.136536	0.997	discard	solver: use rd100 8 starts 0.18 reserve with ILS width 10
+02adac6	0.465234	0.979	discard	solver: use rd100 8 starts 0.18 reserve with 0.005s relocate
+de7d0ca	0.136536	0.989	discard	solver: use rd100 6 starts with 0.18 reserve
+78bb9f2	0.136536	0.996	discard	solver: use rd100 6 starts with 0.005s relocate
+7b435d0	0.136536	0.997	discard	solver: use rd100 6 starts with ILS width 2
+4e0f1d3	0.136536	0.997	discard	solver: use rd100 6 starts with ILS width 10
+25988ab	0.136536	0.997	discard	solver: use rd100 8 starts with default ILS
+97bea5c	0.409608	0.997	discard	solver: use rd100 0.18 reserve with default ILS
+22134b7	0.136536	0.979	discard	solver: use rd100 5 starts with 0.18 reserve
+ee86648	0.136536	0.997	discard	solver: use rd100 5 starts 0.18 reserve with ILS width 2
