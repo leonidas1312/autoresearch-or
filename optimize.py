@@ -51,12 +51,12 @@ SCHEDULER_BUDGET_WEIGHTS_BY_SIZE = {
     # Medium uses a 1-second total budget, so the two gap-scored instances get
     # just enough time to stay stable while more time flows to the largest raw-objective cases.
     "medium": {
-        "lin318": 0.09,
-        "pcb442": 0.05,
-        "rat783": 0.07,
-        "pr1002": 0.05,
+        "lin318": 0.10,
+        "pcb442": 0.06,
+        "rat783": 0.08,
+        "pr1002": 0.06,
         "nrw1379": 0.30,
-        "pcb3038": 0.44,
+        "pcb3038": 0.40,
     },
 }
 
