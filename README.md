@@ -2,7 +2,7 @@
 
 This repository is inspired by [karpathy/autoresearch](https://github.com/karpathy/autoresearch). The basic idea is to let the agent improve a fixed benchmarked solver loop by editing `optimize.py`: for each benchmark instance, it can tune or rewrite the solver logic used for that instance, and it can also reallocate slices of a single total run budget across the instances in the tier to drive the aggregate score down. 
 
-Three benchmark sizes are considered: small, medium, and large. The benchmark set is built from [TSPLIB95](https://www.iwr.uni-heidelberg.de/groups/comopt/software/TSPLIB95/) and the [University of Waterloo TSP data collection](https://www.math.uwaterloo.ca/tsp/data/). For small size the experiments found the optimal known tour in 4 out of 5 instances. Medium and large instances are still largely open work.
+Three benchmark sizes are considered: small, medium, and large. The benchmark set is built from [TSPLIB95](https://www.or.uni-bonn.de/lectures/ws17/co_exercises/programming/tsp/tsp95.pdf) and the [University of Waterloo TSP data collection](https://www.math.uwaterloo.ca/tsp/data/). For small size the experiments found the optimal known tour in 4 out of 5 instances. Medium and large instances are still largely open work.
 
 ## Progress Plots
 
