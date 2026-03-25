@@ -40,12 +40,30 @@ class SolverSpec:
 
 
 # The scheduler maps the fixed harness budget into per-benchmark solver budgets.
-SCHEDULER_BUDGET_WEIGHTS = {
-    "att48": 0.38,
-    "eil51": 0.16,
-    "berlin52": 0.05,
-    "pr76": 0.25,
-    "rd100": 0.16,
+SCHEDULER_BUDGET_WEIGHTS_BY_SIZE = {
+    "small": {
+        "att48": 0.38,
+        "eil51": 0.16,
+        "berlin52": 0.05,
+        "pr76": 0.25,
+        "rd100": 0.16,
+    },
+    # Medium uses a 1-second total budget, so the two gap-scored instances get
+    # just enough time to stay stable while more time flows to the largest raw-objective cases.
+    "medium": {
+        "lin318": 0.10,
+        "pcb442": 0.06,
+        "rat783": 0.08,
+        "pr1002": 0.06,
+        "nrw1379": 0.30,
+        "pcb3038": 0.40,
+    },
+}
+
+INSTANCE_SIZE_BY_NAME = {
+    instance_name: size
+    for size, instance_names in prepare.BENCHMARK_TIERS.items()
+    for instance_name in instance_names
 }
 
 
@@ -131,10 +149,16 @@ def _distance(instance: TSPInstance, a: int, b: int) -> int:
 
 
 def allocate_instance_budget(instance: TSPInstance, budget_s: float) -> float:
-    weight = SCHEDULER_BUDGET_WEIGHTS.get(instance.name)
+    size = INSTANCE_SIZE_BY_NAME.get(instance.name)
+    if size is None:
+        return budget_s
+    weights = SCHEDULER_BUDGET_WEIGHTS_BY_SIZE.get(size)
+    if not weights:
+        return budget_s
+    weight = weights.get(instance.name)
     if weight is None:
         return budget_s
-    total_budget_s = budget_s * len(SCHEDULER_BUDGET_WEIGHTS)
+    total_budget_s = budget_s * len(prepare.BENCHMARK_TIERS[size])
     return total_budget_s * weight
 
 
