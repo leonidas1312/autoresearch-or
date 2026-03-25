@@ -8,6 +8,12 @@ Benchmarks are grouped into `small`, `medium`, and `large` tiers and are discove
 
 The baseline in `optimize.py` is deterministic nearest-neighbor construction with budget-aware 2-opt, plus a simple sweep fallback for extreme optional large instances where exact nearest-neighbor is not practical.
 
+Current progress plots from `plot_results.ipynb`:
+
+![Small benchmark progress](assets/plots/progress_small.png)
+
+![Medium benchmark progress](assets/plots/progress_medium.png)
+
 Run one benchmark with:
 
 ```bash
