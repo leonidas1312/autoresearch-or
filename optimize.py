@@ -102,6 +102,12 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
         max_starts=4,
         ils_enabled=False,
     ),
+    "pr1002": SolverSpec(
+        solver_name="pr1002_single_start",
+        start_order="time_boxed",
+        max_starts=1,
+        ils_enabled=False,
+    ),
 }
 
 DEFAULT_SOLVER_SPEC = SolverSpec(
