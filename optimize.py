@@ -102,6 +102,18 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
         max_starts=4,
         ils_enabled=False,
     ),
+    "nrw1379": SolverSpec(
+        solver_name="nrw1379_high_reserve",
+        start_order="time_boxed",
+        restart_reserve_fraction=0.20,
+        ils_enabled=False,
+    ),
+    "pcb3038": SolverSpec(
+        solver_name="pcb3038_high_reserve",
+        start_order="time_boxed",
+        restart_reserve_fraction=0.20,
+        ils_enabled=False,
+    ),
 }
 
 DEFAULT_SOLVER_SPEC = SolverSpec(
