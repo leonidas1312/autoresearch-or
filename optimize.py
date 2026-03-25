@@ -164,7 +164,26 @@ def allocate_instance_budget(instance: TSPInstance, budget_s: float) -> float:
 
 def choose_start_nodes(instance: TSPInstance, seed: int) -> list[int]:
     n = instance.dimension
-    anchor_nodes = [0, n // 4, n // 2, (3 * n) // 4, n - 1]
+    if n <= 1_000:
+        anchor_nodes = [0, n // 4, n // 2, (3 * n) // 4, n - 1]
+    else:
+        xs = [x for x, _ in instance.coords]
+        ys = [y for _, y in instance.coords]
+        centroid_x = sum(xs) / n
+        centroid_y = sum(ys) / n
+        anchor_nodes = [
+            min(range(n), key=lambda node: (xs[node], node)),
+            max(range(n), key=lambda node: (xs[node], -node)),
+            min(range(n), key=lambda node: (ys[node], node)),
+            max(range(n), key=lambda node: (ys[node], -node)),
+            max(
+                range(n),
+                key=lambda node: (
+                    (xs[node] - centroid_x) ** 2 + (ys[node] - centroid_y) ** 2,
+                    -node,
+                ),
+            ),
+        ]
     rng = random.Random(seed)
     candidates = [node for node in anchor_nodes if 0 <= node < n]
 
