@@ -55,8 +55,8 @@ SCHEDULER_BUDGET_WEIGHTS_BY_SIZE = {
         "pcb442": 0.06,
         "rat783": 0.08,
         "pr1002": 0.06,
-        "nrw1379": 0.30,
-        "pcb3038": 0.40,
+        "nrw1379": 0.32,
+        "pcb3038": 0.38,
     },
 }
 
