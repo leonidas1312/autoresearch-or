@@ -1,2 +1,4 @@
 run.log
+results/
 results.tsv
+results_small.tsv
