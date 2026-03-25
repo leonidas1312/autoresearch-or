@@ -357,7 +357,7 @@ def two_opt(instance: TSPInstance, tour: list[int], deadline: float) -> tuple[li
         max_passes = 50
         mode = "full"
     elif n <= WINDOWED_TWO_OPT_LIMIT:
-        window = 80 if n <= 10_000 else 16
+        window = 120 if n <= 10_000 else 16
         max_passes = 2 if n <= 10_000 else 1
         mode = "windowed"
     else:
