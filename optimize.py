@@ -32,6 +32,7 @@ class SolverSpec:
     solver_name: str
     start_order: str = "time_boxed"
     max_starts: int | None = None
+    anchor_order: tuple[str, ...] | None = None
     restart_reserve_fraction: float = RELOCATE_RESERVE_FRACTION
     candidate_relocate_limit_s: float = PER_CANDIDATE_RELOCATE_LIMIT_S
     ils_enabled: bool = False
@@ -102,6 +103,13 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
         max_starts=4,
         ils_enabled=False,
     ),
+    "pr1002": SolverSpec(
+        solver_name="pr1002_pair_no_relocate",
+        start_order="time_boxed",
+        anchor_order=("max_x", "max_y"),
+        candidate_relocate_limit_s=0.0,
+        ils_enabled=False,
+    ),
 }
 
 DEFAULT_SOLVER_SPEC = SolverSpec(
@@ -162,7 +170,11 @@ def allocate_instance_budget(instance: TSPInstance, budget_s: float) -> float:
     return total_budget_s * weight
 
 
-def choose_start_nodes(instance: TSPInstance, seed: int) -> list[int]:
+def choose_start_nodes(
+    instance: TSPInstance,
+    seed: int,
+    spec: SolverSpec | None = None,
+) -> list[int]:
     n = instance.dimension
     if n <= 1_000:
         anchor_nodes = [0, n // 4, n // 2, (3 * n) // 4, n - 1]
@@ -171,19 +183,38 @@ def choose_start_nodes(instance: TSPInstance, seed: int) -> list[int]:
         ys = [y for _, y in instance.coords]
         centroid_x = sum(xs) / n
         centroid_y = sum(ys) / n
-        anchor_nodes = [
-            min(range(n), key=lambda node: (xs[node], node)),
-            max(range(n), key=lambda node: (xs[node], -node)),
-            min(range(n), key=lambda node: (ys[node], node)),
-            max(range(n), key=lambda node: (ys[node], -node)),
-            max(
+        geometric_nodes = {
+            "min_x": min(range(n), key=lambda node: (xs[node], node)),
+            "max_x": max(range(n), key=lambda node: (xs[node], -node)),
+            "min_y": min(range(n), key=lambda node: (ys[node], node)),
+            "max_y": max(range(n), key=lambda node: (ys[node], -node)),
+            "far": max(
                 range(n),
                 key=lambda node: (
                     (xs[node] - centroid_x) ** 2 + (ys[node] - centroid_y) ** 2,
                     -node,
                 ),
             ),
-        ]
+        }
+        if spec is not None and spec.anchor_order is not None:
+            anchor_nodes = [
+                geometric_nodes[name]
+                for name in spec.anchor_order
+                if name in geometric_nodes
+            ]
+            anchor_nodes.extend(
+                node
+                for label, node in geometric_nodes.items()
+                if label not in spec.anchor_order
+            )
+        else:
+            anchor_nodes = [
+                geometric_nodes["min_x"],
+                geometric_nodes["max_x"],
+                geometric_nodes["min_y"],
+                geometric_nodes["max_y"],
+                geometric_nodes["far"],
+            ]
     rng = random.Random(seed)
     candidates = [node for node in anchor_nodes if 0 <= node < n]
 
@@ -464,7 +495,7 @@ def solve_with_multistart(
     if instance.dimension <= TIME_BOXED_MULTI_START_LIMIT:
         starts, start_order_mode = build_start_order(instance, spec, seed, deadline)
     else:
-        starts = choose_start_nodes(instance, seed)
+        starts = choose_start_nodes(instance, seed, spec)
         start_order_mode = "anchor_nodes"
     if spec.max_starts is not None:
         starts = starts[: spec.max_starts]
