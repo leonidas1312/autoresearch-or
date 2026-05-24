@@ -28,6 +28,7 @@ PILOT_START_RANKING_MAX_S = 0.015
 class SolverSpec:
     solver_name: str
     construction: str = "multi_start_nearest_neighbor"
+    sweep_bucket_size: int | None = None
     start_order: str = "time_boxed"
     max_starts: int | None = None
     restart_reserve_fraction: float = RELOCATE_RESERVE_FRACTION
@@ -93,10 +94,12 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
     "rat783": SolverSpec(
         solver_name="rat783_sweep",
         construction="sweep",
+        sweep_bucket_size=56,
     ),
     "pcb3038": SolverSpec(
         solver_name="pcb3038_sweep",
         construction="sweep",
+        sweep_bucket_size=96,
     ),
 }
 
@@ -289,12 +292,12 @@ def block_shift_kick(tour: list[int], rng: random.Random, width: int) -> list[in
     return remainder[:insert_at] + block + remainder[insert_at:]
 
 
-def sweep_tour(instance: TSPInstance) -> list[int]:
+def sweep_tour(instance: TSPInstance, bucket_size: int | None = None) -> list[int]:
     n = instance.dimension
     order = list(range(n))
     order.sort(key=lambda node: (instance.coords[node][0], instance.coords[node][1], node))
 
-    bucket_size = max(32, int(math.sqrt(n)))
+    bucket_size = bucket_size or max(32, int(math.sqrt(n)))
     tour: list[int] = []
     reverse = False
     for start in range(0, n, bucket_size):
@@ -422,7 +425,7 @@ def solve_with_multistart(
     deadline: float,
 ) -> tuple[list[int], dict[str, Any]]:
     if spec.construction == "sweep":
-        tour = sweep_tour(instance)
+        tour = sweep_tour(instance, spec.sweep_bucket_size)
         tour, two_opt_meta = two_opt(instance, tour, deadline)
         relocate_meta = {"relocate_mode": "skipped", "relocate_moves": 0}
         if time.perf_counter() < deadline:
