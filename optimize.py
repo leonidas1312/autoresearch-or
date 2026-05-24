@@ -27,6 +27,7 @@ PILOT_START_RANKING_MAX_S = 0.015
 @dataclass(frozen=True, slots=True)
 class SolverSpec:
     solver_name: str
+    construction: str = "multi_start_nearest_neighbor"
     start_order: str = "time_boxed"
     max_starts: int | None = None
     restart_reserve_fraction: float = RELOCATE_RESERVE_FRACTION
@@ -88,6 +89,10 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
         start_order="time_boxed",
         max_starts=4,
         ils_enabled=False,
+    ),
+    "pcb3038": SolverSpec(
+        solver_name="pcb3038_sweep",
+        construction="sweep",
     ),
 }
 
@@ -412,6 +417,24 @@ def solve_with_multistart(
     seed: int,
     deadline: float,
 ) -> tuple[list[int], dict[str, Any]]:
+    if spec.construction == "sweep":
+        tour = sweep_tour(instance)
+        tour, two_opt_meta = two_opt(instance, tour, deadline)
+        relocate_meta = {"relocate_mode": "skipped", "relocate_moves": 0}
+        if time.perf_counter() < deadline:
+            tour, relocate_meta = relocate(instance, tour, deadline)
+        return tour, {
+            "construction": "sweep",
+            "solver_name": spec.solver_name,
+            "start_order_mode": "sweep",
+            "candidate_starts": 1,
+            "starts_tried": 1,
+            "best_start": None,
+            "allocated_budget_s": budget_s,
+            **two_opt_meta,
+            **relocate_meta,
+        }
+
     if instance.dimension > EXACT_NEAREST_NEIGHBOR_LIMIT:
         return sweep_tour(instance), {
             "construction": "sweep",
