@@ -37,12 +37,22 @@ class SolverSpec:
 
 
 # The scheduler maps the fixed harness budget into per-benchmark solver budgets.
-SCHEDULER_BUDGET_WEIGHTS = {
-    "att48": 0.40,
-    "eil51": 0.16,
-    "berlin52": 0.05,
-    "pr76": 0.25,
-    "rd100": 0.14,
+SCHEDULER_BUDGET_WEIGHTS_BY_SIZE = {
+    "small": {
+        "att48": 0.40,
+        "eil51": 0.16,
+        "berlin52": 0.05,
+        "pr76": 0.25,
+        "rd100": 0.14,
+    },
+    "medium": {
+        "lin318": 0.04,
+        "pcb442": 0.04,
+        "rat783": 0.06,
+        "pr1002": 0.08,
+        "nrw1379": 0.55,
+        "pcb3038": 0.23,
+    },
 }
 
 
@@ -124,11 +134,12 @@ def _distance(instance: TSPInstance, a: int, b: int) -> int:
 
 
 def allocate_instance_budget(instance: TSPInstance, budget_s: float) -> float:
-    weight = SCHEDULER_BUDGET_WEIGHTS.get(instance.name)
-    if weight is None:
-        return budget_s
-    total_budget_s = budget_s * len(SCHEDULER_BUDGET_WEIGHTS)
-    return total_budget_s * weight
+    for weights in SCHEDULER_BUDGET_WEIGHTS_BY_SIZE.values():
+        weight = weights.get(instance.name)
+        if weight is not None:
+            total_budget_s = budget_s * len(weights)
+            return total_budget_s * weight
+    return budget_s
 
 
 def choose_start_nodes(instance: TSPInstance, seed: int) -> list[int]:
