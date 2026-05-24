@@ -82,11 +82,24 @@ The current medium optimizer changes are intentionally contained in `optimize.py
 - sweep construction for `rat783` and `pcb3038` with tuned bucket sizes
 - preferred nearest-neighbor starts for `lin318`, `nrw1379`, and `pr1002`
 
+
+## OR-Tools Reference Baselines
+
+Unknown-optimum instances can be assigned reproducible reference baselines with the optional OR-Tools runner:
+
+```bash
+python3 -m venv .venv-ortools
+.venv-ortools/bin/pip install ortools
+.venv-ortools/bin/python scripts/ortools_tsp_baseline.py --size medium --time-limit 570
+```
+
+The runner writes JSON artifacts under `ortools_baselines/` and appends aggregate rows to `ortools_baselines.tsv`. Suggested time limits are 60 seconds for small unknown-optimum instances, 570 seconds for medium unknown-optimum instances in this runner, leaving shutdown slack under the 600-second process cap, and 3600 seconds for large unknown-optimum instances that are small enough for OR-Tools to model. Extremely large instances may be skipped with `--max-nodes` rather than exhausting memory.
+
 ## Benchmark Tiers
 
 The benchmark set is split into `small`, `medium`, and `large`. All instances are loaded from the local `data/tsp/` folder.
 
-For rows with a TSPLIB optimum, `Gap To Reference` is `(current_objective - optimum) / optimum * 100`. For rows without a published/reference tour in this repo, the table intentionally says `pending` until a separate exact-solver or externally verified baseline run is available. At the time of this update, no Concorde/LKH exact-capable executable was available in the local runner, so unknown-optimum rows are not assigned synthetic “exact” gaps.
+For rows with a TSPLIB optimum, `Gap To Reference` is `(current_objective - optimum) / optimum * 100`. For rows without a published/reference tour in this repo, the table intentionally says `pending` until a separate exact-solver or externally verified baseline run is available. For unknown-optimum rows, `Gap To Reference` is measured against a time-limited OR-Tools reference when available. OR-Tools references are reproducible baselines, not proofs of optimality.
 
 | Size | Instance | Nodes | Edge Type | Reference Type | Current 1s Objective | Gap To Reference | Optimizer Revision | Data File |
 | --- | --- | ---: | --- | --- | ---: | ---: | --- | --- |
@@ -95,12 +108,12 @@ For rows with a TSPLIB optimum, `Gap To Reference` is `(current_objective - opti
 | small | berlin52 | 52 | EUC_2D | TSPLIB optimum | pending | pending | pending | `data/tsp/tsplib/berlin52.tsp` |
 | small | pr76 | 76 | EUC_2D | TSPLIB optimum | pending | pending | pending | `data/tsp/tsplib/pr76.tsp` |
 | small | rd100 | 100 | EUC_2D | TSPLIB optimum | pending | pending | pending | `data/tsp/tsplib/rd100.tsp` |
-| medium | lin318 | 318 | EUC_2D | time-limited exact baseline pending | 49411.00 | pending | [`e8f4990`](https://github.com/leonidas1312/autoresearch-or/commit/e8f4990) | `data/tsp/tsplib/lin318.tsp` |
+| medium | lin318 | 318 | EUC_2D | OR-Tools 570s reference 43234 | 49411.00 | 14.287366% | [`e8f4990`](https://github.com/leonidas1312/autoresearch-or/commit/e8f4990) | `data/tsp/tsplib/lin318.tsp` |
 | medium | pcb442 | 442 | EUC_2D | TSPLIB optimum 50778 | 149900.00 | 195.206586% | [`e8f4990`](https://github.com/leonidas1312/autoresearch-or/commit/e8f4990) | `data/tsp/tsplib/pcb442.tsp` |
-| medium | rat783 | 783 | EUC_2D | time-limited exact baseline pending | 11146.00 | pending | [`e8f4990`](https://github.com/leonidas1312/autoresearch-or/commit/e8f4990) | `data/tsp/tsplib/rat783.tsp` |
+| medium | rat783 | 783 | EUC_2D | OR-Tools 570s reference 9112 | 11146.00 | 22.322212% | [`e8f4990`](https://github.com/leonidas1312/autoresearch-or/commit/e8f4990) | `data/tsp/tsplib/rat783.tsp` |
 | medium | pr1002 | 1002 | EUC_2D | TSPLIB optimum 259045 | 341948.00 | 32.003320% | [`e8f4990`](https://github.com/leonidas1312/autoresearch-or/commit/e8f4990) | `data/tsp/tsplib/pr1002.tsp` |
-| medium | nrw1379 | 1379 | EUC_2D | time-limited exact baseline pending | 68633.00 | pending | [`e8f4990`](https://github.com/leonidas1312/autoresearch-or/commit/e8f4990) | `data/tsp/tsplib/nrw1379.tsp` |
-| medium | pcb3038 | 3038 | EUC_2D | time-limited exact baseline pending | 177419.00 | pending | [`e8f4990`](https://github.com/leonidas1312/autoresearch-or/commit/e8f4990) | `data/tsp/tsplib/pcb3038.tsp` |
+| medium | nrw1379 | 1379 | EUC_2D | OR-Tools 570s reference 58859 | 68633.00 | 16.605787% | [`e8f4990`](https://github.com/leonidas1312/autoresearch-or/commit/e8f4990) | `data/tsp/tsplib/nrw1379.tsp` |
+| medium | pcb3038 | 3038 | EUC_2D | OR-Tools 570s reference 153750 | 177419.00 | 15.394472% | [`e8f4990`](https://github.com/leonidas1312/autoresearch-or/commit/e8f4990) | `data/tsp/tsplib/pcb3038.tsp` |
 | large | qa194 | 194 | EUC_2D | time-limited exact baseline pending | pending | pending | pending | `data/tsp/waterloo/qa194.tsp` |
 | large | uy734 | 734 | EUC_2D | time-limited exact baseline pending | pending | pending | pending | `data/tsp/waterloo/uy734.tsp` |
 | large | lu980 | 980 | EUC_2D | time-limited exact baseline pending | pending | pending | pending | `data/tsp/waterloo/lu980.tsp` |

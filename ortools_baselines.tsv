@@ -1,0 +1,5 @@
+instance	dimension	status	time_limit_s	elapsed_s	objective	gap_to_known_pct
+lin318	318	ok	570	570.027	43234.000000	
+rat783	783	ok	570	570.056	9112.000000	
+nrw1379	1379	ok	570	570.058	58859.000000	
+pcb3038	3038	ok	570	570.072	153750.000000	
