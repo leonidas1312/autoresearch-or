@@ -67,14 +67,14 @@ results.tsv      aggregate experiment log
 
 ## Reproducing The Current Optimizers
 
-The current medium optimizer lives in `optimize.py` on branch `autoresearch/2026-05-24-medium-1s`. The solver code for the best kept medium configuration is reproducible from optimizer commit `e8f4990` (which reverts a discarded `pcb442` attempt and leaves the best kept optimizer logic in place). Run:
+The current medium optimizer lives in `optimize.py` on branch `autoresearch/2026-05-24-medium-1s`. The optimizer is identified by a Git revision rather than by the run artifact, so the exact solver code can be recovered later. Run:
 
 ```bash
 git checkout e8f4990
 python3 optimize.py --size medium --budget 1 --seed 0 --description "reproduce medium optimizer"
 ```
 
-The latest validation at that commit reported aggregate score `51139.368318` in `1.012s`. Due to strict wall-clock cutoffs, small run-to-run variation is expected; the best logged equivalent-code run before the discard/revert sequence was `51092.771228` at commit `bab181d`.
+The latest validation at optimizer revision [`e8f4990`](https://github.com/leonidas1312/autoresearch-or/commit/e8f4990) reported aggregate score `51139.368318` in `1.012s`. Due to strict wall-clock cutoffs, small run-to-run variation is expected; the best logged equivalent-code run before the discard/revert sequence was `51092.771228` at revision [`bab181d`](https://github.com/leonidas1312/autoresearch-or/commit/bab181d).
 
 The current medium optimizer changes are intentionally contained in `optimize.py`:
 
@@ -86,22 +86,24 @@ The current medium optimizer changes are intentionally contained in `optimize.py
 
 The benchmark set is split into `small`, `medium`, and `large`. All instances are loaded from the local `data/tsp/` folder.
 
-| Size | Instance | Nodes | Edge Type | Optimal Tour Known | Metric Harness Gap To Known Optimum | Current 1s Harness Cost | Harness Commit | Data File |
+For rows with a TSPLIB optimum, `Gap To Reference` is `(current_objective - optimum) / optimum * 100`. For rows without a published/reference tour in this repo, the table intentionally says `pending` until a separate exact-solver or externally verified baseline run is available. At the time of this update, no Concorde/LKH exact-capable executable was available in the local runner, so unknown-optimum rows are not assigned synthetic “exact” gaps.
+
+| Size | Instance | Nodes | Edge Type | Reference Type | Current 1s Objective | Gap To Reference | Optimizer Revision | Data File |
 | --- | --- | ---: | --- | --- | ---: | ---: | --- | --- |
-| small | att48 | 48 | ATT | yes | pending on current medium branch | pending | pending | `data/tsp/tsplib/att48.tsp` |
-| small | eil51 | 51 | EUC_2D | yes | pending on current medium branch | pending | pending | `data/tsp/tsplib/eil51.tsp` |
-| small | berlin52 | 52 | EUC_2D | yes | pending on current medium branch | pending | pending | `data/tsp/tsplib/berlin52.tsp` |
-| small | pr76 | 76 | EUC_2D | yes | pending on current medium branch | pending | pending | `data/tsp/tsplib/pr76.tsp` |
-| small | rd100 | 100 | EUC_2D | yes | pending on current medium branch | pending | pending | `data/tsp/tsplib/rd100.tsp` |
-| medium | lin318 | 318 | EUC_2D | no | n/a | 49411.00 | `e8f4990` | `data/tsp/tsplib/lin318.tsp` |
-| medium | pcb442 | 442 | EUC_2D | yes | 195.206586% | 195.206586 | `e8f4990` | `data/tsp/tsplib/pcb442.tsp` |
-| medium | rat783 | 783 | EUC_2D | no | n/a | 11146.00 | `e8f4990` | `data/tsp/tsplib/rat783.tsp` |
-| medium | pr1002 | 1002 | EUC_2D | yes | 32.003320% | 32.003320 | `e8f4990` | `data/tsp/tsplib/pr1002.tsp` |
-| medium | nrw1379 | 1379 | EUC_2D | no | n/a | 68633.00 | `e8f4990` | `data/tsp/tsplib/nrw1379.tsp` |
-| medium | pcb3038 | 3038 | EUC_2D | no | n/a | 177419.00 | `e8f4990` | `data/tsp/tsplib/pcb3038.tsp` |
-| large | qa194 | 194 | EUC_2D | no | n/a | pending | pending | `data/tsp/waterloo/qa194.tsp` |
-| large | uy734 | 734 | EUC_2D | no | n/a | pending | pending | `data/tsp/waterloo/uy734.tsp` |
-| large | lu980 | 980 | EUC_2D | no | n/a | pending | pending | `data/tsp/waterloo/lu980.tsp` |
-| large | gr9882 | 9882 | EUC_2D | no | n/a | pending | pending | `data/tsp/waterloo/gr9882.tsp` |
-| large | ch71009 | 71009 | EUC_2D | no | n/a | pending | pending | `data/tsp/waterloo/ch71009.tsp` |
-| large | world | 1904711 | GEOM | no | n/a | pending | pending | `data/tsp/waterloo/world.tsp` |
+| small | att48 | 48 | ATT | TSPLIB optimum | pending | pending | pending | `data/tsp/tsplib/att48.tsp` |
+| small | eil51 | 51 | EUC_2D | TSPLIB optimum | pending | pending | pending | `data/tsp/tsplib/eil51.tsp` |
+| small | berlin52 | 52 | EUC_2D | TSPLIB optimum | pending | pending | pending | `data/tsp/tsplib/berlin52.tsp` |
+| small | pr76 | 76 | EUC_2D | TSPLIB optimum | pending | pending | pending | `data/tsp/tsplib/pr76.tsp` |
+| small | rd100 | 100 | EUC_2D | TSPLIB optimum | pending | pending | pending | `data/tsp/tsplib/rd100.tsp` |
+| medium | lin318 | 318 | EUC_2D | time-limited exact baseline pending | 49411.00 | pending | [`e8f4990`](https://github.com/leonidas1312/autoresearch-or/commit/e8f4990) | `data/tsp/tsplib/lin318.tsp` |
+| medium | pcb442 | 442 | EUC_2D | TSPLIB optimum 50778 | 149900.00 | 195.206586% | [`e8f4990`](https://github.com/leonidas1312/autoresearch-or/commit/e8f4990) | `data/tsp/tsplib/pcb442.tsp` |
+| medium | rat783 | 783 | EUC_2D | time-limited exact baseline pending | 11146.00 | pending | [`e8f4990`](https://github.com/leonidas1312/autoresearch-or/commit/e8f4990) | `data/tsp/tsplib/rat783.tsp` |
+| medium | pr1002 | 1002 | EUC_2D | TSPLIB optimum 259045 | 341948.00 | 32.003320% | [`e8f4990`](https://github.com/leonidas1312/autoresearch-or/commit/e8f4990) | `data/tsp/tsplib/pr1002.tsp` |
+| medium | nrw1379 | 1379 | EUC_2D | time-limited exact baseline pending | 68633.00 | pending | [`e8f4990`](https://github.com/leonidas1312/autoresearch-or/commit/e8f4990) | `data/tsp/tsplib/nrw1379.tsp` |
+| medium | pcb3038 | 3038 | EUC_2D | time-limited exact baseline pending | 177419.00 | pending | [`e8f4990`](https://github.com/leonidas1312/autoresearch-or/commit/e8f4990) | `data/tsp/tsplib/pcb3038.tsp` |
+| large | qa194 | 194 | EUC_2D | time-limited exact baseline pending | pending | pending | pending | `data/tsp/waterloo/qa194.tsp` |
+| large | uy734 | 734 | EUC_2D | time-limited exact baseline pending | pending | pending | pending | `data/tsp/waterloo/uy734.tsp` |
+| large | lu980 | 980 | EUC_2D | time-limited exact baseline pending | pending | pending | pending | `data/tsp/waterloo/lu980.tsp` |
+| large | gr9882 | 9882 | EUC_2D | time-limited exact baseline pending | pending | pending | pending | `data/tsp/waterloo/gr9882.tsp` |
+| large | ch71009 | 71009 | EUC_2D | time-limited exact baseline pending | pending | pending | pending | `data/tsp/waterloo/ch71009.tsp` |
+| large | world | 1904711 | GEOM | time-limited exact baseline pending | pending | pending | pending | `data/tsp/waterloo/world.tsp` |
