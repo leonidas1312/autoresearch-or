@@ -94,7 +94,7 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
     ),
     "lin318": SolverSpec(
         solver_name="lin318_fixed_start",
-        preferred_starts=(250,),
+        preferred_starts=(255,),
     ),
     "nrw1379": SolverSpec(
         solver_name="nrw1379_fixed_start",
