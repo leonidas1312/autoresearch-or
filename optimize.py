@@ -96,6 +96,10 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
         solver_name="lin318_fixed_start",
         preferred_starts=(250,),
     ),
+    "nrw1379": SolverSpec(
+        solver_name="nrw1379_fixed_start",
+        preferred_starts=(114,),
+    ),
     "rat783": SolverSpec(
         solver_name="rat783_sweep",
         construction="sweep",
