@@ -104,10 +104,6 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
         solver_name="pr1002_fixed_start",
         preferred_starts=(1001,),
     ),
-    "pcb442": SolverSpec(
-        solver_name="pcb442_fixed_start",
-        preferred_starts=(175,),
-    ),
     "rat783": SolverSpec(
         solver_name="rat783_sweep",
         construction="sweep",
