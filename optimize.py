@@ -90,6 +90,10 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
         max_starts=4,
         ils_enabled=False,
     ),
+    "rat783": SolverSpec(
+        solver_name="rat783_sweep",
+        construction="sweep",
+    ),
     "pcb3038": SolverSpec(
         solver_name="pcb3038_sweep",
         construction="sweep",
