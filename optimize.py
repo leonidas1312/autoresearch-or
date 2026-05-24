@@ -29,6 +29,7 @@ class SolverSpec:
     solver_name: str
     construction: str = "multi_start_nearest_neighbor"
     sweep_bucket_size: int | None = None
+    preferred_starts: tuple[int, ...] = ()
     start_order: str = "time_boxed"
     max_starts: int | None = None
     restart_reserve_fraction: float = RELOCATE_RESERVE_FRACTION
@@ -90,6 +91,10 @@ BENCHMARK_SOLVERS: dict[str, SolverSpec] = {
         start_order="time_boxed",
         max_starts=4,
         ils_enabled=False,
+    ),
+    "lin318": SolverSpec(
+        solver_name="lin318_fixed_start",
+        preferred_starts=(250,),
     ),
     "rat783": SolverSpec(
         solver_name="rat783_sweep",
@@ -454,6 +459,9 @@ def solve_with_multistart(
 
     if instance.dimension <= TIME_BOXED_MULTI_START_LIMIT:
         starts, start_order_mode = build_start_order(instance, spec, seed, deadline)
+    elif spec.preferred_starts:
+        starts = [start for start in spec.preferred_starts if 0 <= start < instance.dimension]
+        start_order_mode = "preferred_starts"
     else:
         starts = choose_start_nodes(instance, seed)
         start_order_mode = "anchor_nodes"
