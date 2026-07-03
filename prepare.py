@@ -3,26 +3,69 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import signal
 import statistics
 import subprocess
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data" / "tsp"
-RESULTS_DIR = ROOT / "results"
-RESULTS_TSV = ROOT / "results.tsv"
+RESULTS_DIR = ROOT / "results_v3"
+RESULTS_TSV = ROOT / "results_v3.tsv"
+
+SCORE_SCHEMA = "relative_gap_pct_v3"
+TIMER_GRACE_S = 0.25
+OVER_BUDGET_TOLERANCE_S = 0.05
 
 BENCHMARK_TIERS: dict[str, tuple[str, ...]] = {
     "small": ("att48", "eil51", "berlin52", "pr76", "rd100"),
     "medium": ("lin318", "pcb442", "rat783", "pr1002", "nrw1379", "pcb3038"),
     "large": ("qa194", "uy734", "lu980", "gr9882", "ch71009", "world"),
 }
+BENCHMARK_SIZE_CHOICES = ("all", *BENCHMARK_TIERS)
+
+REFERENCE_SUITE_ALIASES = {
+    "all": "all",
+    "opt_tour": "opt_tour",
+    "optimal": "opt_tour",
+    "baseline_ref": "baseline_ref",
+    "baseline": "baseline_ref",
+}
+REFERENCE_SUITE_CHOICES = tuple(REFERENCE_SUITE_ALIASES)
 
 SUPPORTED_EDGE_WEIGHT_TYPES = {"EUC_2D", "CEIL_2D", "ATT", "GEO", "GEOM"}
+
+# V3 uses one normalized score for every selected instance. Known TSPLIB instances use their
+# local .opt.tour objective; all other instances use this deterministic harness
+# baseline. The suite filter keeps known-optimum and baseline-reference results
+# separable while preserving size filters for quick experiments.
+REFERENCE_OBJECTIVES: dict[str, tuple[float, str]] = {
+    "att48": (10628.0, "opt_tour"),
+    "eil51": (426.0, "opt_tour"),
+    "berlin52": (7542.0, "opt_tour"),
+    "pr76": (108159.0, "opt_tour"),
+    "rd100": (7910.0, "opt_tour"),
+    "lin318": (68360.0, "baseline_sweep_v1"),
+    "pcb442": (50778.0, "opt_tour"),
+    "rat783": (15299.0, "baseline_sweep_v1"),
+    "pr1002": (259045.0, "opt_tour"),
+    "nrw1379": (79914.0, "baseline_sweep_v1"),
+    "pcb3038": (231633.0, "baseline_sweep_v1"),
+    "qa194": (16342.0, "baseline_sweep_v1"),
+    "uy734": (122837.0, "baseline_sweep_v1"),
+    "lu980": (19338.0, "baseline_sweep_v1"),
+    "gr9882": (603290.0, "baseline_sweep_v1"),
+    "ch71009": (11757850.0, "baseline_sweep_v1"),
+    "world": (35917135.0, "baseline_sweep_v1"),
+}
+
+
+class BenchmarkTimeout(RuntimeError):
+    pass
 
 
 @dataclass(slots=True)
@@ -31,9 +74,15 @@ class TSPInstance:
     coords: list[tuple[float, float]]
     dimension: int
     edge_weight_type: str
-    best_known: float | None = None
-    reference_tour: list[int] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class BenchmarkCase:
+    name: str
+    instance: TSPInstance
+    reference_objective: float
+    reference_kind: str
 
 
 def _parse_header_line(line: str) -> tuple[str, str] | None:
@@ -214,50 +263,32 @@ def load_tsp_instance(path: Path) -> TSPInstance:
     if len(coords) != dimension:
         raise ValueError(f"{name}: expected {dimension} coordinates, found {len(coords)}")
 
-    reference_path = None
-    for suffix in (".opt.tour", ".tour"):
-        candidate = path.with_name(f"{path.stem}{suffix}")
-        if candidate.exists():
-            reference_path = candidate
-            break
-
-    reference_tour = None
-    best_known = None
-    if reference_path is not None:
-        reference_tour = load_reference_tour(reference_path, dimension)
-        feasible, error = validate_tour(
-            TSPInstance(
-                name=name,
-                coords=coords,
-                dimension=dimension,
-                edge_weight_type=edge_weight_type,
-            ),
-            reference_tour,
-        )
-        if not feasible:
-            raise ValueError(f"{name}: invalid reference tour: {error}")
-        best_known = compute_tour_length(
-            TSPInstance(
-                name=name,
-                coords=coords,
-                dimension=dimension,
-                edge_weight_type=edge_weight_type,
-            ),
-            reference_tour,
-        )
-
     return TSPInstance(
         name=name,
         coords=coords,
         dimension=dimension,
         edge_weight_type=edge_weight_type,
-        best_known=best_known,
-        reference_tour=reference_tour,
-        metadata={
-            "source_path": str(path),
-            "reference_path": str(reference_path) if reference_path is not None else None,
-        },
+        metadata={"source_path": str(path)},
     )
+
+
+def baseline_sweep_tour(instance: TSPInstance) -> list[int]:
+    n = instance.dimension
+    order = list(range(n))
+    order.sort(key=lambda node: (instance.coords[node][0], instance.coords[node][1], node))
+
+    bucket_size = max(32, int(math.sqrt(n)))
+    tour: list[int] = []
+    reverse = False
+    for start in range(0, n, bucket_size):
+        block = order[start : start + bucket_size]
+        block.sort(
+            key=lambda node: (instance.coords[node][1], instance.coords[node][0], node),
+            reverse=reverse,
+        )
+        tour.extend(block)
+        reverse = not reverse
+    return tour
 
 
 def discover_instance_paths() -> dict[str, Path]:
@@ -270,77 +301,173 @@ def discover_instance_paths() -> dict[str, Path]:
     return paths
 
 
-def describe_tier(size: str) -> dict[str, list[dict[str, Any]]]:
+def _all_benchmark_stems() -> tuple[str, ...]:
+    return tuple(stem for tier in BENCHMARK_TIERS.values() for stem in tier)
+
+
+def _canonical_suite(suite: str) -> str:
+    try:
+        return REFERENCE_SUITE_ALIASES[suite]
+    except KeyError as exc:
+        choices = ", ".join(REFERENCE_SUITE_CHOICES)
+        raise ValueError(f"Unknown reference suite {suite!r}; expected one of: {choices}") from exc
+
+
+def _benchmark_stems_for_size(size: str) -> tuple[str, ...]:
+    if size == "all":
+        return _all_benchmark_stems()
+    try:
+        return BENCHMARK_TIERS[size]
+    except KeyError as exc:
+        choices = ", ".join(BENCHMARK_SIZE_CHOICES)
+        raise ValueError(f"Unknown benchmark size {size!r}; expected one of: {choices}") from exc
+
+
+def _reference_kind_matches_suite(reference_kind: str, suite: str) -> bool:
+    canonical_suite = _canonical_suite(suite)
+    if canonical_suite == "all":
+        return True
+    if canonical_suite == "opt_tour":
+        return reference_kind == "opt_tour"
+    if canonical_suite == "baseline_ref":
+        return reference_kind != "opt_tour"
+    raise AssertionError(f"unhandled suite: {canonical_suite}")
+
+
+def _selected_benchmark_stems(size: str, suite: str) -> tuple[str, ...]:
+    selected: list[str] = []
+    for stem in _benchmark_stems_for_size(size):
+        _, reference_kind = _reference_entry_for(stem)
+        if _reference_kind_matches_suite(reference_kind, suite):
+            selected.append(stem)
+    return tuple(selected)
+
+
+def _reference_path_for(path: Path) -> Path | None:
+    for suffix in (".opt.tour", ".tour"):
+        candidate = path.with_name(f"{path.stem}{suffix}")
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _reference_entry_for(instance_name: str) -> tuple[float, str]:
+    try:
+        return REFERENCE_OBJECTIVES[instance_name]
+    except KeyError as exc:
+        raise ValueError(f"{instance_name}: missing V3 reference objective") from exc
+
+
+def _validate_opt_tour_reference(path: Path, instance: TSPInstance, expected: float) -> None:
+    reference_path = _reference_path_for(path)
+    if reference_path is None:
+        raise ValueError(f"{instance.name}: reference objective expects an opt tour, but none exists")
+    reference_tour = load_reference_tour(reference_path, instance.dimension)
+    feasible, error = validate_tour(instance, reference_tour)
+    if not feasible:
+        raise ValueError(f"{instance.name}: invalid reference tour: {error}")
+    actual = compute_tour_length(instance, reference_tour)
+    if actual != expected:
+        raise ValueError(
+            f"{instance.name}: reference objective mismatch, expected {expected}, got {actual}"
+        )
+
+
+def load_benchmark_case(path: Path) -> BenchmarkCase:
+    instance = load_tsp_instance(path)
+    reference_objective, reference_kind = _reference_entry_for(instance.name)
+    if reference_kind == "opt_tour":
+        _validate_opt_tour_reference(path, instance, reference_objective)
+    return BenchmarkCase(
+        name=instance.name,
+        instance=instance,
+        reference_objective=reference_objective,
+        reference_kind=reference_kind,
+    )
+
+
+def describe_selection(size: str, suite: str = "all") -> dict[str, list[dict[str, Any]]]:
     available = discover_instance_paths()
     found: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
+    stems = _selected_benchmark_stems(size, suite)
 
-    for stem in BENCHMARK_TIERS[size]:
+    for stem in stems:
         path = available.get(stem)
         if path is None:
             missing.append({"name": stem})
             continue
         inspected = inspect_instance_file(path)
+        reference_objective, reference_kind = REFERENCE_OBJECTIVES.get(
+            inspected["name"], (None, "missing")
+        )
         found.append(
             {
                 "name": inspected["name"],
                 "dimension": inspected["dimension"],
                 "edge_weight_type": inspected["edge_weight_type"],
                 "path": str(path),
-                "reference_tour": any(
-                    path.with_name(f"{path.stem}{suffix}").exists()
-                    for suffix in (".opt.tour", ".tour")
-                ),
+                "reference_objective": reference_objective,
+                "reference_kind": reference_kind,
             }
         )
 
     return {"found": found, "missing": missing}
 
 
-def load_benchmark_instances(size: str, verbose: bool = True) -> list[TSPInstance]:
-    if size not in BENCHMARK_TIERS:
-        raise ValueError(f"Unknown benchmark size: {size}")
+def describe_tier(size: str) -> dict[str, list[dict[str, Any]]]:
+    return describe_selection(size=size, suite="all")
 
+
+def load_benchmark_instances(
+    size: str,
+    suite: str = "all",
+    verbose: bool = True,
+    allow_missing: bool = False,
+) -> list[BenchmarkCase]:
     available = discover_instance_paths()
-    instances: list[TSPInstance] = []
+    cases: list[BenchmarkCase] = []
     found_names: list[str] = []
     missing_names: list[str] = []
+    canonical_suite = _canonical_suite(suite)
 
-    for stem in BENCHMARK_TIERS[size]:
+    for stem in _selected_benchmark_stems(size, canonical_suite):
         path = available.get(stem)
         if path is None:
             missing_names.append(stem)
             continue
-        instances.append(load_tsp_instance(path))
+        cases.append(load_benchmark_case(path))
         found_names.append(stem)
+
+    if missing_names and not allow_missing:
+        raise FileNotFoundError(
+            f"{size}: missing required benchmark instances: {', '.join(missing_names)}"
+        )
 
     if verbose:
         print(f"[prepare] size={size}")
+        print(f"[prepare] suite={canonical_suite}")
         if found_names:
             print(f"[prepare] found={', '.join(found_names)}")
         if missing_names:
-            print(f"[prepare] missing={', '.join(missing_names)}")
-        if not found_names:
-            print(f"[prepare] no {size} benchmark instances found under {DATA_DIR}")
+            mode = "allowed" if allow_missing else "not allowed"
+            print(f"[prepare] missing ({mode})={', '.join(missing_names)}")
 
-    if size == "large" and not instances:
-        print("[prepare] no large instances are available locally, exiting cleanly.")
+    if not cases:
+        raise FileNotFoundError(
+            f"size={size} suite={canonical_suite}: no benchmark instances found under {DATA_DIR}"
+        )
 
-    return instances
+    return cases
 
 
-def score_objective(instance: TSPInstance, objective: float) -> dict[str, Any]:
-    if instance.best_known is not None:
-        score = ((objective - instance.best_known) / instance.best_known) * 100.0
-        return {
-            "score": score,
-            "score_kind": "gap_pct",
-            "reference_objective": instance.best_known,
-        }
+def score_objective(case: BenchmarkCase, objective: float) -> dict[str, Any]:
+    score = ((objective - case.reference_objective) / case.reference_objective) * 100.0
     return {
-        "score": objective,
-        "score_kind": "raw_objective",
-        "reference_objective": None,
+        "score": score,
+        "score_kind": "relative_gap_pct",
+        "reference_objective": case.reference_objective,
+        "reference_kind": case.reference_kind,
     }
 
 
@@ -352,12 +479,26 @@ def summarize_scores(per_instance_metrics: Sequence[dict[str, Any]], total_runti
     else:
         mean_score = math.inf
         median_score = math.inf
+    reference_kind_metrics: dict[str, dict[str, Any]] = {}
+    for reference_kind in sorted({item["reference_kind"] for item in per_instance_metrics}):
+        kind_scores = [
+            item["score"]
+            for item in per_instance_metrics
+            if item["reference_kind"] == reference_kind
+        ]
+        reference_kind_metrics[reference_kind] = {
+            "score": statistics.fmean(kind_scores),
+            "mean_score": statistics.fmean(kind_scores),
+            "median_score": statistics.median(kind_scores),
+            "num_instances": len(kind_scores),
+        }
     return {
         "score": mean_score,
         "mean_score": mean_score,
         "median_score": median_score,
         "total_runtime_s": total_runtime_s,
         "num_instances": len(per_instance_metrics),
+        "reference_kind_metrics": reference_kind_metrics,
     }
 
 
@@ -375,44 +516,70 @@ def get_git_commit() -> str:
     return result.stdout.strip() or "nogit"
 
 
+def get_git_dirty() -> bool:
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return False
+    return bool(result.stdout.strip())
+
+
 def build_run_stub(
     *,
     size: str,
+    suite: str,
     seed: int,
     budget_s: float,
     benchmark_instance_names: Sequence[str],
+    allow_missing: bool = False,
 ) -> dict[str, Any]:
+    canonical_suite = _canonical_suite(suite)
     timestamp = datetime.now(timezone.utc)
     run_id = timestamp.strftime("%Y%m%dT%H%M%S%fZ")
     return {
-        "run_id": f"{run_id}_{size}_seed{seed}",
+        "run_id": f"{run_id}_{size}_{canonical_suite}_seed{seed}",
         "timestamp": timestamp.isoformat(),
         "size": size,
+        "suite": canonical_suite,
         "seed": seed,
         "budget_s": budget_s,
         "commit": get_git_commit(),
+        "git_dirty": get_git_dirty(),
         "benchmark_instance_names": list(benchmark_instance_names),
+        "allow_missing": allow_missing,
+        "score_schema": SCORE_SCHEMA,
     }
 
 
 def build_artifact(
     *,
     size: str,
+    suite: str,
     seed: int,
     budget_s: float,
     benchmark_instance_names: Sequence[str],
     per_instance_metrics: Sequence[dict[str, Any]],
     total_runtime_s: float,
+    allow_missing: bool = False,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     artifact = build_run_stub(
         size=size,
+        suite=suite,
         seed=seed,
         budget_s=budget_s,
         benchmark_instance_names=benchmark_instance_names,
+        allow_missing=allow_missing,
     )
     artifact["per_instance_metrics"] = list(per_instance_metrics)
     artifact["aggregate_metrics"] = summarize_scores(per_instance_metrics, total_runtime_s)
+    artifact["over_budget"] = total_runtime_s > budget_s + OVER_BUDGET_TOLERANCE_S
     if extra:
         artifact.update(extra)
     return artifact
@@ -421,88 +588,179 @@ def build_artifact(
 def build_crash_artifact(
     *,
     size: str,
+    suite: str,
     seed: int,
     budget_s: float,
     benchmark_instance_names: Sequence[str],
     total_runtime_s: float,
     error: str,
+    error_type: str = "Exception",
+    allow_missing: bool = False,
 ) -> dict[str, Any]:
     return build_artifact(
         size=size,
+        suite=suite,
         seed=seed,
         budget_s=budget_s,
         benchmark_instance_names=benchmark_instance_names,
         per_instance_metrics=[],
         total_runtime_s=total_runtime_s,
-        extra={"error": error},
+        allow_missing=allow_missing,
+        extra={"error": error, "error_type": error_type},
     )
 
 
-def _allocate_instance_budgets(instances: Sequence[TSPInstance], total_budget_s: float) -> list[float]:
-    if not instances:
-        return []
-    per_instance = total_budget_s / len(instances)
-    return [per_instance for _ in instances]
+def clone_solver_instance(instance: TSPInstance) -> TSPInstance:
+    return TSPInstance(
+        name=instance.name,
+        coords=list(instance.coords),
+        dimension=instance.dimension,
+        edge_weight_type=instance.edge_weight_type,
+        metadata=dict(instance.metadata),
+    )
+
+
+def _timeout_handler(signum: int, frame: Any) -> None:
+    raise BenchmarkTimeout("benchmark solver exceeded hard wall-clock timeout")
+
+
+def _arm_timeout(seconds: float) -> Any:
+    if not hasattr(signal, "SIGALRM") or seconds <= 0:
+        return None
+    previous = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, _timeout_handler)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    return previous
+
+
+def _clear_timeout(previous: Any) -> None:
+    if previous is None or not hasattr(signal, "SIGALRM"):
+        return
+    signal.setitimer(signal.ITIMER_REAL, 0)
+    signal.signal(signal.SIGALRM, previous)
+
+
+def _normalize_result(result: Any, instance_name: str) -> Mapping[str, Any]:
+    if not isinstance(result, Mapping):
+        raise TypeError(f"{instance_name}: solver result must be a mapping")
+    if "solution" not in result:
+        raise KeyError(f"{instance_name}: solver result missing 'solution'")
+    return result
 
 
 def run_benchmark(
     *,
-    instances: Sequence[TSPInstance],
-    solve_instance: Callable[[TSPInstance, float, int], dict[str, Any]],
+    cases: Sequence[BenchmarkCase],
+    solve_benchmark: Callable[[Sequence[TSPInstance], float, int, float], Mapping[str, Any]],
     size: str,
+    suite: str,
     budget_s: float,
     seed: int,
+    allow_missing: bool = False,
 ) -> dict[str, Any]:
-    per_instance_metrics: list[dict[str, Any]] = []
-    budgets = _allocate_instance_budgets(instances, budget_s)
+    if budget_s <= 0:
+        raise ValueError("budget_s must be positive")
+
+    expected_names = [case.name for case in cases]
+    solver_instances = [clone_solver_instance(case.instance) for case in cases]
     benchmark_start = time.perf_counter()
+    deadline = benchmark_start + budget_s
+    previous_handler = _arm_timeout(budget_s + TIMER_GRACE_S)
 
-    for index, (instance, instance_budget) in enumerate(zip(instances, budgets, strict=False)):
-        instance_seed = seed + index
-        solve_start = time.perf_counter()
-        result = solve_instance(instance, instance_budget, instance_seed)
-        runtime_s = time.perf_counter() - solve_start
+    try:
+        raw_results = solve_benchmark(solver_instances, budget_s, seed, deadline)
 
-        solution = result["solution"]
-        feasible, error = validate_tour(instance, solution)
-        if not feasible:
-            raise ValueError(error)
+        total_runtime_s = time.perf_counter() - benchmark_start
+        if total_runtime_s > budget_s + OVER_BUDGET_TOLERANCE_S:
+            raise BenchmarkTimeout(
+                f"benchmark exceeded budget: runtime={total_runtime_s:.3f}s budget={budget_s:.3f}s"
+            )
+        if not isinstance(raw_results, Mapping):
+            raise TypeError("solve_benchmark must return a mapping keyed by instance name")
 
-        objective = compute_tour_length(instance, solution)
-        scored = score_objective(instance, objective)
-        per_instance_metrics.append(
-            {
-                "name": instance.name,
-                "dimension": instance.dimension,
-                "edge_weight_type": instance.edge_weight_type,
-                "budget_s": instance_budget,
-                "seed": instance_seed,
-                "objective": objective,
-                "reported_objective": result.get("objective"),
-                "score": scored["score"],
-                "score_kind": scored["score_kind"],
-                "reference_objective": scored["reference_objective"],
-                "runtime_s": runtime_s,
-                "metadata": result.get("metadata", {}),
-            }
+        actual_names = set(raw_results)
+        expected_set = set(expected_names)
+        missing = sorted(expected_set - actual_names)
+        extra = sorted(actual_names - expected_set)
+        if missing:
+            raise KeyError(f"solver did not return results for: {', '.join(missing)}")
+        if extra:
+            raise KeyError(f"solver returned unexpected results for: {', '.join(extra)}")
+
+        per_instance_metrics: list[dict[str, Any]] = []
+        for case in cases:
+            result = _normalize_result(raw_results[case.name], case.name)
+            solution = result["solution"]
+            feasible, error = validate_tour(case.instance, solution)
+            if not feasible:
+                raise ValueError(error)
+
+            objective = compute_tour_length(case.instance, solution)
+            scored = score_objective(case, objective)
+            metadata = dict(result.get("metadata", {}))
+            per_instance_metrics.append(
+                {
+                    "name": case.name,
+                    "dimension": case.instance.dimension,
+                    "edge_weight_type": case.instance.edge_weight_type,
+                    "objective": objective,
+                    "reported_objective": result.get("objective"),
+                    "score": scored["score"],
+                    "score_kind": scored["score_kind"],
+                    "reference_objective": scored["reference_objective"],
+                    "reference_kind": scored["reference_kind"],
+                    "assigned_budget_s": metadata.get("assigned_budget_s"),
+                    "solver_runtime_s": metadata.get("runtime_s", metadata.get("elapsed_s")),
+                    "deadline_hit": metadata.get("deadline_hit"),
+                    "stop_reason": metadata.get("stop_reason"),
+                    "metadata": metadata,
+                }
+            )
+
+        total_runtime_s = time.perf_counter() - benchmark_start
+        if total_runtime_s > budget_s + OVER_BUDGET_TOLERANCE_S:
+            raise BenchmarkTimeout(
+                f"benchmark exceeded budget: runtime={total_runtime_s:.3f}s budget={budget_s:.3f}s"
+            )
+        return build_artifact(
+            size=size,
+            suite=suite,
+            seed=seed,
+            budget_s=budget_s,
+            benchmark_instance_names=expected_names,
+            per_instance_metrics=per_instance_metrics,
+            total_runtime_s=total_runtime_s,
+            allow_missing=allow_missing,
         )
-
-    total_runtime_s = time.perf_counter() - benchmark_start
-    return build_artifact(
-        size=size,
-        seed=seed,
-        budget_s=budget_s,
-        benchmark_instance_names=[instance.name for instance in instances],
-        per_instance_metrics=per_instance_metrics,
-        total_runtime_s=total_runtime_s,
-    )
+    finally:
+        _clear_timeout(previous_handler)
 
 
 def initialize_results_tsv() -> None:
     if RESULTS_TSV.exists():
         return
     RESULTS_TSV.write_text(
-        "commit\tscore\truntime_s\tstatus\tdescription\n",
+        "\t".join(
+            [
+                "run_id",
+                "commit",
+                "score",
+                "runtime_s",
+                "size",
+                "suite",
+                "seed",
+                "budget_s",
+                "num_instances",
+                "opt_tour_score",
+                "baseline_ref_score",
+                "over_budget",
+                "score_schema",
+                "status",
+                "artifact_path",
+                "description",
+            ]
+        )
+        + "\n",
         encoding="utf-8",
     )
 
@@ -512,27 +770,54 @@ def record_run(artifact: dict[str, Any], *, status: str, description: str) -> Pa
     initialize_results_tsv()
 
     artifact_path = RESULTS_DIR / f"{artifact['run_id']}.json"
+    relative_artifact_path = artifact_path.relative_to(ROOT)
+    clean_description = description.replace("\t", " ").strip()
+    artifact["status"] = status
+    artifact["description"] = clean_description
+    artifact["artifact_path"] = str(relative_artifact_path)
     artifact_path.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
 
-    score = artifact["aggregate_metrics"]["score"]
-    runtime_s = artifact["aggregate_metrics"]["total_runtime_s"]
-    clean_description = description.replace("\t", " ").strip()
+    aggregate = artifact["aggregate_metrics"]
+    reference_metrics = aggregate.get("reference_kind_metrics", {})
+
+    def score_field(reference_kind: str) -> str:
+        metric = reference_metrics.get(reference_kind)
+        if metric is None:
+            return ""
+        return f"{metric['score']:.6f}"
+
+    fields = [
+        artifact["run_id"],
+        artifact["commit"],
+        f"{aggregate['score']:.6f}",
+        f"{aggregate['total_runtime_s']:.3f}",
+        artifact["size"],
+        artifact["suite"],
+        str(artifact["seed"]),
+        f"{artifact['budget_s']:.6f}",
+        str(aggregate["num_instances"]),
+        score_field("opt_tour"),
+        score_field("baseline_sweep_v1"),
+        str(bool(artifact.get("over_budget", False))).lower(),
+        artifact["score_schema"],
+        status,
+        str(relative_artifact_path),
+        clean_description,
+    ]
     with RESULTS_TSV.open("a", encoding="utf-8") as handle:
-        handle.write(
-            f"{artifact['commit']}\t{score:.6f}\t{runtime_s:.3f}\t{status}\t{clean_description}\n"
-        )
+        handle.write("\t".join(fields) + "\n")
     return artifact_path
 
 
-def _print_tier_summary(size: str) -> None:
-    description = describe_tier(size)
-    print(f"{size}:")
+def _print_selection_summary(size: str, suite: str = "all") -> None:
+    canonical_suite = _canonical_suite(suite)
+    description = describe_selection(size=size, suite=canonical_suite)
+    print(f"{size} [{canonical_suite}]:")
     if description["found"]:
         for item in description["found"]:
-            reference = "yes" if item["reference_tour"] else "no"
             print(
                 f"  - {item['name']} (n={item['dimension']}, edge={item['edge_weight_type']}, "
-                f"reference_tour={reference})"
+                f"reference={item['reference_objective']}:{item['reference_kind']})"
             )
     else:
         print("  - none found")
@@ -540,20 +825,67 @@ def _print_tier_summary(size: str) -> None:
         print("  missing:", ", ".join(item["name"] for item in description["missing"]))
 
 
+def _print_tier_summary(size: str) -> None:
+    _print_selection_summary(size=size, suite="all")
+
+
+def check_reference_objectives() -> None:
+    cases = load_benchmark_instances("all", suite="all", verbose=False)
+    for case in cases:
+        if case.reference_kind == "baseline_sweep_v1":
+            tour = baseline_sweep_tour(case.instance)
+            actual = compute_tour_length(case.instance, tour)
+            if actual != case.reference_objective:
+                raise ValueError(
+                    f"{case.name}: baseline reference mismatch, "
+                    f"expected {case.reference_objective}, got {actual}"
+                )
+        print(
+            f"{case.name}\t{case.reference_objective:.0f}\t{case.reference_kind}"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Inspect local TSP benchmark availability.")
-    parser.add_argument("--list", action="store_true", help="List all benchmark tiers.")
-    parser.add_argument("--size", choices=tuple(BENCHMARK_TIERS), help="Inspect one benchmark tier.")
+    parser.add_argument("--list", action="store_true", help="List benchmark instances.")
+    parser.add_argument(
+        "--size",
+        choices=BENCHMARK_SIZE_CHOICES,
+        help="Filter by benchmark size; use all for the cross-size suite.",
+    )
+    parser.add_argument(
+        "--suite",
+        choices=REFERENCE_SUITE_CHOICES,
+        default="all",
+        help="Filter by reference suite: all, opt_tour/optimal, or baseline_ref/baseline.",
+    )
+    parser.add_argument("--allow-missing", action="store_true", help="Allow missing tier instances.")
+    parser.add_argument(
+        "--check-references",
+        action="store_true",
+        help="Recompute and validate all V3 reference objectives.",
+    )
     args = parser.parse_args()
 
-    if args.list or args.size is None:
-        for size in BENCHMARK_TIERS:
-            _print_tier_summary(size)
+    if args.check_references:
+        check_reference_objectives()
         return 0
 
-    _print_tier_summary(args.size)
-    if args.size == "large" and not describe_tier("large")["found"]:
-        print("[prepare] no large instances are available locally, exiting cleanly.")
+    if args.size is not None:
+        _print_selection_summary(args.size, args.suite)
+        load_benchmark_instances(
+            args.size,
+            suite=args.suite,
+            verbose=False,
+            allow_missing=args.allow_missing,
+        )
+        return 0
+
+    if args.list:
+        _print_selection_summary("all", args.suite)
+    else:
+        for size in BENCHMARK_TIERS:
+            _print_selection_summary(size, args.suite)
     return 0
 
 
