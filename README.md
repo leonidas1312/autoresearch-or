@@ -61,15 +61,15 @@ results_v3/      V3 per-run JSON artifacts
 results_v3.tsv   V3 aggregate experiment log
 ```
 
-## Current V3 Results
+## V3 Progress
 
 V3 separates known-optimum `.opt.tour` instances from baseline-reference instances. A score of `0.0` on `opt_tour` means the solver matched the known tour objective. Negative `baseline_ref` scores mean the solver beat the committed sweep baseline, not that it proved global optimality.
 
-![V3 suite scorecard](assets/plots/v3_suite_scorecard.png)
+The plots below follow the original `karpathy/autoresearch` progress-chart format: gray points are discarded attempts, green points are kept score improvements, and the green step line is the running best score.
 
-![Known-optimum gaps](assets/plots/v3_opt_tour_gaps.png)
+![V3 known-optimum progress](assets/plots/progress_opt_tour.png)
 
-![Baseline-reference improvements](assets/plots/v3_baseline_ref_gaps.png)
+![V3 baseline-reference progress](assets/plots/progress_baseline_ref.png)
 
 ## Benchmark Tiers
 
